@@ -1,197 +1,106 @@
-# Filament-sync unified 2.0.2
+# Klipper Filament Sync — unified 2.0.2
 
-One installer for standard Klipper and RatOS. The bundled frontend is based on
-Mainsail 2.19.0. Compilation moves to GitHub Actions; printer hosts download the
-compiled web assets through Moonraker. No Node.js, npm, Vite, TypeScript, or build
-cache is needed on the printer for this update path.
+One filament-metadata integration for standard Klipper and RatOS. It adds the
+filament controls to Mainsail and, when installed, KlipperScreen; synchronizes
+material, color, nozzle temperature, and bed temperature with Moonraker
+`lane_data`; and retains tool mapping for multi-tool printers while disabling it
+for single-tool printers.
 
-Source and release worker: https://github.com/maevebaksa/Klipper-Filament-Sync
+The Mainsail frontend is based on official Mainsail 2.19.0 and compiled by
+GitHub Actions. Printer hosts download the tested frontend through Moonraker—no
+Node.js, npm, Vite, TypeScript compilation, or frontend source cache runs on a
+printer.
 
-Read BUILD-STATUS.md for this archive’s build identity.
+## Install
 
-## Install or migrate from 1.x
-
-Run as your normal printer user while the printer is idle:
-
-```bash
-cd ~ && tar -xzf filament-sync-unified-2.0.2.tar.gz && cd filament-sync-unified-2.0.2 && bash install.sh --with-updates
-```
-
-The installer stops and disables the old `filament-sync-mainsail-guard.timer`,
-stops its running service and child processes, and replaces the old builder with
-a harmless compatibility stub. It moves any legacy
-`printer_data/config/tool-filament-sync/mainsail_source/cache` directory to
-`~/.cache/filament-sync/retired-...`. It preserves the contents, including
-symlinks. A cache already outside the config tree is left alone. This addresses
-the overlapping inotify-root warning caused by the old compiler source tree.
-
-Restart Moonraker once while idle to discard its old watches/warnings:
+Run as the normal printer user while the printer is idle:
 
 ```bash
-sudo systemctl restart moonraker
+cd ~ && \
+curl -fL 'https://github.com/maevebaksa/Klipper-Filament-Sync/releases/download/v2.19.0%2Bfs.2.0.2/filament-sync-unified-2.0.2.tar.gz' -o filament-sync-unified-2.0.2.tar.gz && \
+tar -xzf filament-sync-unified-2.0.2.tar.gz && \
+bash filament-sync-unified-2.0.2/install.sh --with-updates
 ```
 
-Run `RESTART` in Mainsail to load macro changes, then hard-refresh your browser.
+Run `RESTART` in Mainsail, then hard-refresh the browser. Verify with:
 
 ```bash
 ~/printer_data/config/tool-filament-sync/verify.sh
 ```
 
-RatOS is detected from its installed native load/unload macro files. The same
-existing temperature wrappers and standard Orbiter integrations are retained.
-The installer preserves `config.json`, the Klipper SAVE_CONFIG boundary, and
-RatOS-generated configuration. It creates an initial frontend backup under
-`~/mainsail-patch-backups/`. Host paths come from the current user's account,
-including installations using a renamed printer username.
+The installer detects RatOS from its native load/unload macro files and selects
+the matching integration. It preserves `config.json`, RatOS-generated files,
+PID and other data below Klipper's `SAVE_CONFIG` boundary, and the currently
+configured physical-tool count. It uses the current account's real home path,
+including renamed printer users.
 
-Optional path overrides: `MAINSAIL_DIR`, `KLIPPERSCREEN_DIR`, and
-`RATOS_CONFIGURATOR_DIR`. The standard config root is `~/printer_data/config`.
+## Updates
 
-The offline bundle installs only over a recognized same-or-older Mainsail
-version. It never replaces a frontend already configured for cloud updates.
-Until the cloud repository is configured, a normal upstream Mainsail update can
-remove the custom panel. The retired builder will not restore or recompile it.
+Installation creates two Moonraker entries as applicable:
 
-## GitHub worker
+- The existing Mainsail updater is redirected to this repository's compiled
+  releases while retaining its updater name and `persistent_files`.
+- **filament-sync-panel** tracks only our KlipperScreen panel and menu from
+  `~/Klipper-Filament-Sync`. It does not update upstream KlipperScreen.
 
-The worker lives in `maevebaksa/Klipper-Filament-Sync`. Its Actions workflow
-publishes compiled releases used by every printer. For a fork, copy this source,
-enable Actions, and pass the fork’s repository to `setup_updates.py`.
+The small scheduler checks about every six hours, with startup delay and jitter.
+It installs at most one UI update per run and requires Klipper ready, print state
+idle/complete/cancelled, `idle_timeout` Idle, every heater target zero, and
+Moonraker's updater idle. Invalid, dirty, modified, anomalous, unknown, failed,
+or downgrade candidates are skipped. It never requests Klipper, firmware,
+RatOS Core, operating-system, or full-system updates.
 
-The workflow checks the latest official stable Mainsail release every six hours.
-It resolves a source commit, checks out that exact upstream tag, verifies that
-the tag did not move, applies the patch with `git apply --check`, installs the
-locked dependencies, runs lint, unit tests, an explicit TypeScript check, and
-the production build. A failure publishes nothing. The last successful release
-stays available; an incompatible future Mainsail release requires a patch update.
+GitHub checks official stable Mainsail every six hours. A new frontend is
+published only after the patch applies cleanly and Mainsail lint, unit tests,
+TypeScript checking, production compilation, archive validation, installer
+tests, and checksums pass. If a future Mainsail release is incompatible, the
+last successful release remains installed.
 
-Release tags and titles use `v2.19.0+fs.2.0.2`. Bump `VERSION` when changing this
-package or its patch; an already published release is never overwritten. The
-ZIP is named `00-mainsail.zip` and uploaded first to support Moonraker’s
-asset-selection and rollback behavior even when GitHub sorts assets by name. All assets are uploaded to a draft before publication. An interrupted
-draft must be inspected and deleted before a retry; do not publish it manually.
-
-The build job has read-only repository permissions; publication happens in a
-separate job with write permission. No printer credentials are stored in GitHub.
-Release assets include `00-mainsail.zip`, the unified installer, the complete patched
-Mainsail source, a commit/patch manifest, and SHA256SUMS. The publish job verifies
-the checksums. Printer downloads use Moonraker's normal HTTPS ZIP updater;
-Moonraker does not independently verify the separate SHA256SUMS file.
-
-GitHub may disable scheduled workflows in inactive public repositories; check
-the Actions page if the release feed stops advancing. GitHub schedules are not
-guaranteed to run at an exact time.
-
-## Connect each printer to cloud releases
-
-The recommended `install.sh --with-updates` command registers cloud Mainsail
-and, when installed, our KlipperScreen plugin with Moonraker automatically.
-To configure just the Mainsail updater separately:
-
-```bash
-python3 ~/printer_data/config/tool-filament-sync/setup_updates.py --repo maevebaksa/Klipper-Filament-Sync
-```
-
-This verifies a compatible public release exists, finds the existing Moonraker
-updater that targets your Mainsail directory, and overrides that same updater.
-It does not create a second updater for the same path. It preserves existing
-`persistent_files` and includes `config.json`. It also updates Mainsail's local
-release metadata so Moonraker will use the selected repository instead of
-falling back to the official one. Existing config and metadata are backed up.
-
-The setup restarts Moonraker only while the printer is idle and enables the
-small `filament-sync-auto-update.timer`. No firmware, Klipper, RatOS Core, or
-system-wide updates are requested by this timer.
-
-## Our KlipperScreen plugin updates
-
-The separate `filament-sync-panel` entry appears in Moonraker’s Update Manager.
-It tracks this repository’s `main` branch in `~/Klipper-Filament-Sync`, outside
-Moonraker’s watched config tree. KlipperScreen loads our panel and menu directly
-from its `klipperscreen/` directory. Reinstallation preserves that source.
-
-Enable just our plugin updater:
-
-```bash
-python3 ~/printer_data/config/tool-filament-sync/setup_updates.py --plugin-only
-```
-
-Or configure both UI components:
-
-```bash
-python3 ~/printer_data/config/tool-filament-sync/setup_updates.py --repo maevebaksa/Klipper-Filament-Sync --klipperscreen-plugin
-```
-
-A small `filament-sync-panel.service` reloads the running screen after either a
-manual or scheduled plugin update. Setup adds only that service to Moonraker’s
-existing `printer_data/moonraker.asvc` list. It does not alter trusted clients,
-API keys, or authentication code. No upstream KlipperScreen update is requested;
-its separate, user-owned updater is retained if present. No dependency-install
-scripts run for a plugin update. The repository contains the unified installer
-source too, but updating this checkout does not reinstall the bridge or macros.
-
-This corrects the 2.0.0 candidate’s mistaken upstream KlipperScreen target.
-The new scheduler blocks that old target even before setup is rerun. Setup
-removes obsolete upstream entries only from our own generated configuration.
-An old invalid API key remains a separate Switchwire configuration issue.
-
-For non-default locations pass `--mainsail-dir` or `--klipperscreen-dir` to setup,
-matching the paths used for installation. `--moonraker-url` accepts a local
-Moonraker address; `--api-key-file` accepts an existing private key file if local
-trusted access is unavailable.
-
-## Scheduling and failures
-
-The timer checks about every six hours with up to twenty minutes of jitter,
-starting at least fifteen minutes after boot. It reads Moonraker's cached update
-status. Setup enables Moonraker auto-refresh and requests a six-hour refresh
-interval for the selected UI components, retaining Moonraker's existing refresh
-window (normally overnight). Discovery can therefore wait for that window. A reboot alone
-does not cause compilation or reinstallation.
-
-Updates require Klipper ready, print state standby/complete/cancelled,
-`idle_timeout` state Idle, and all heater targets zero. Busy, printing, paused,
-unreachable, unauthorized, invalid, or modified installations are skipped.
-Checks are repeated just before installation, and Moonraker serializes updates
-and rejects print-time requests. These checks are not a reservation preventing
-a person from starting a print at the same instant; avoid starting jobs while
-an update is being installed. Only one UI component updates per timer invocation.
-
-An attempted remote version/hash is recorded before installation in
-`~/.local/state/filament-sync/updates.json`. Failed, interrupted, and already
-attempted targets are not repeatedly retried. A newer remote target can be
-attempted on a later timer tick. Automatic Mainsail downgrades are blocked.
-
-Inspect:
+Inspect automatic checks with:
 
 ```bash
 systemctl status filament-sync-auto-update.timer --no-pager
 journalctl -u filament-sync-auto-update.service -n 60 --no-pager
-cat ~/.local/state/filament-sync/updates.json
 ```
 
-After resolving a failure, explicitly retry while idle:
+To disable automatic checks, run
+`sudo systemctl disable --now filament-sync-auto-update.timer`.
+Manual Moonraker updates remain available.
 
-```bash
-python3 ~/printer_data/config/tool-filament-sync/auto_update.py --settings ~/printer_data/config/tool-filament-sync/auto-update.json --retry
-```
+Installation automatically disables the old local frontend compiler and moves
+its cache outside Moonraker's watched configuration folder, resolving the
+reboot compilation and overlapping-watch warning.
 
-Disable automatic UI updates while retaining manual Moonraker updates:
+## Filament behavior
 
-```bash
-sudo systemctl disable --now filament-sync-auto-update.timer
-```
+- `SET_TOOL_FILAMENT` stores material, color, nozzle temperature, and bed
+  temperature for each physical tool.
+- `FILAMENT_SYNC_STATUS` reports the saved metadata.
+- RatOS installations retain native sensor callbacks and private motion
+  routines; public load/unload entry points use the saved filament temperature
+  when `TEMP` is omitted.
+- Supported standard Orbiter configurations receive the corresponding saved
+  temperature integration.
+- KlipperScreen's panel is loaded from the independently updated plugin checkout
+  and reapplied when KlipperScreen starts.
+- Mainsail preserves the Drake tool-mapping workflow on toolchangers and avoids
+  presenting tool mapping for one-filament machines.
 
-Moonraker provides manual rollback for previously installed cloud releases.
-The initial migration from an official frontend has a local backup instead;
-the new repository has no matching release for that pre-migration version.
-Do not use forced git recovery on the plugin checkout to resolve a modified checkout
-without reviewing and saving its local changes.
+## Credits
 
-## References
+Special thanks to **Sarah** for
+the original Mainsail toolchanger and tool-mapping work that this integration
+builds upon.
 
-- [Official Mainsail v2.19.0](https://github.com/mainsail-crew/mainsail/releases/tag/v2.19.0)
-- [Moonraker frontend updater configuration](https://moonraker.readthedocs.io/en/latest/configuration/#web-type-front-end-configuration)
-- [Moonraker update API](https://moonraker.readthedocs.io/en/latest/external_api/update_manager/)
-- [Official KlipperScreen update-manager setup](https://klipperscreen.readthedocs.io/en/latest/Installation/#moonraker-configuration)
-- [GitHub scheduled workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+This project also relies on Klipper by Kevin O'Connor and contributors,
+Moonraker by Eric Callahan and contributors, and Mainsail by the Mainsail crew.
+
+## Validation and source
+
+Release 2.0.2 passed 15 installer/updater tests and all 46 upstream Mainsail unit
+tests, plus lint, TypeScript, production-build, archive-integrity, and checksum
+gates. See `BUILD-STATUS.md` and the release assets for exact source identities.
+
+- [Source repository](https://github.com/maevebaksa/Klipper-Filament-Sync)
+- [Latest release](https://github.com/maevebaksa/Klipper-Filament-Sync/releases/latest)
+- [Moonraker update-manager configuration](https://moonraker.readthedocs.io/en/latest/configuration/#update-manager)
