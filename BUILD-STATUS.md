@@ -1,4 +1,4 @@
-# Unified 2.0.1 validation
+# Unified 2.0.2 validation
 
 Source release for maevebaksa/Klipper-Filament-Sync. Published installer archives
 replace this file with the GitHub Actions build and upstream commit identity.

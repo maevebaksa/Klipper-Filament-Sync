@@ -1,4 +1,4 @@
-# Filament-sync unified 2.0.1
+# Filament-sync unified 2.0.2
 
 One installer for standard Klipper and RatOS. The bundled frontend is based on
 Mainsail 2.19.0. Compilation moves to GitHub Actions; printer hosts download the
@@ -14,7 +14,7 @@ Read BUILD-STATUS.md for this archive’s build identity.
 Run as your normal printer user while the printer is idle:
 
 ```bash
-cd ~ && tar -xzf filament-sync-unified-2.0.1.tar.gz && cd filament-sync-unified-2.0.1 && bash install.sh --with-updates
+cd ~ && tar -xzf filament-sync-unified-2.0.2.tar.gz && cd filament-sync-unified-2.0.2 && bash install.sh --with-updates
 ```
 
 The installer stops and disables the old `filament-sync-mainsail-guard.timer`,
@@ -65,15 +65,15 @@ locked dependencies, runs lint, unit tests, an explicit TypeScript check, and
 the production build. A failure publishes nothing. The last successful release
 stays available; an incompatible future Mainsail release requires a patch update.
 
-Release tags and titles use `v2.19.0+fs.2.0.1`. Bump `VERSION` when changing this
+Release tags and titles use `v2.19.0+fs.2.0.2`. Bump `VERSION` when changing this
 package or its patch; an already published release is never overwritten. The
-ZIP is uploaded first to support Moonraker's asset-selection and rollback
-behavior. All assets are uploaded to a draft before publication. An interrupted
+ZIP is named `00-mainsail.zip` and uploaded first to support Moonraker’s
+asset-selection and rollback behavior even when GitHub sorts assets by name. All assets are uploaded to a draft before publication. An interrupted
 draft must be inspected and deleted before a retry; do not publish it manually.
 
 The build job has read-only repository permissions; publication happens in a
 separate job with write permission. No printer credentials are stored in GitHub.
-Release assets include `mainsail.zip`, the unified installer, the complete patched
+Release assets include `00-mainsail.zip`, the unified installer, the complete patched
 Mainsail source, a commit/patch manifest, and SHA256SUMS. The publish job verifies
 the checksums. Printer downloads use Moonraker's normal HTTPS ZIP updater;
 Moonraker does not independently verify the separate SHA256SUMS file.

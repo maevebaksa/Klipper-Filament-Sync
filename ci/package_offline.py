@@ -25,7 +25,7 @@ def package(validation, destination):
         shutil.copytree(ROOT, staging, ignore=shutil.ignore_patterns(".git", "__pycache__", "release-output"))
         bundle = staging / "mainsail_frontend/mainsail.zip"
         bundle.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(validation / "mainsail.zip") as source, zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as target:
+        with zipfile.ZipFile(validation / ("00-mainsail.zip" if (validation / "00-mainsail.zip").exists() else "mainsail.zip")) as source, zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as target:
             for entry in source.infolist():
                 if entry.filename in (".version", "release_info.json"):
                     continue

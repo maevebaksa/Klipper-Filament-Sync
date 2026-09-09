@@ -96,6 +96,6 @@ jobs:
           cd release-output
           sha256sum --check SHA256SUMS
           gh release create "$RELEASE_TAG" --target "$TARGET_SHA" --title "$RELEASE_TAG" --notes "Filament-sync unified frontend built from official Mainsail $UPSTREAM_TAG. See build-manifest.json for source and patch identity." --draft
-          gh release upload "$RELEASE_TAG" mainsail.zip
+          gh release upload "$RELEASE_TAG" 00-mainsail.zip
           gh release upload "$RELEASE_TAG" filament-sync-unified-*.tar.gz mainsail-patched-source.tar.gz build-manifest.json SHA256SUMS
           gh release edit "$RELEASE_TAG" --draft=false --latest="$MAKE_LATEST"

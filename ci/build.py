@@ -97,14 +97,14 @@ def build(repo, source_tag, source_sha, output):
         (dist / ".version").write_text(release_tag + "\n")
         (dist / "release_info.json").write_text(json.dumps({
             "project_owner": owner, "project_name": name,
-            "version": release_tag, "asset_name": "mainsail.zip",
+            "version": release_tag, "asset_name": "00-mainsail.zip",
         }, indent=2) + "\n")
         manifest = {"upstream": UPSTREAM, "upstream_tag": source_tag, "upstream_commit": actual,
                     "package_version": version, "release": release_tag,
                     "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest()}
         (dist / "filament-sync-build.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copy2(source / "LICENSE", dist / "MAINSail-LICENSE.txt")
-        frontend = output / "mainsail.zip"
+        frontend = output / "00-mainsail.zip"
         with zipfile.ZipFile(frontend, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(dist.rglob("*")):
                 if path.is_file() and path.name != "mainsail.zip":

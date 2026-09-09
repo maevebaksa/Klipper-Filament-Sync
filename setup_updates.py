@@ -65,7 +65,7 @@ def release_exists(repo):
     if (release.get("draft") or release.get("prerelease")
             or not re.fullmatch(r"v\d+\.\d+\.\d+\+fs\.\d+\.\d+\.\d+", release.get("tag_name", ""))
             or release.get("name") != release.get("tag_name")
-            or not any(asset["name"] == "mainsail.zip" for asset in release.get("assets", []))):
+            or not any(asset["name"] == "00-mainsail.zip" for asset in release.get("assets", []))):
         raise ValueError("Repository has no compatible published filament-sync release")
     return release
 
@@ -149,7 +149,7 @@ def main():
         metadata_path = root / "release_info.json"
         metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
         metadata.update(project_owner=owner, project_name=repo_name,
-                        version=(root / ".version").read_text().strip(), asset_name="mainsail.zip")
+                        version=(root / ".version").read_text().strip(), asset_name="00-mainsail.zip")
         name = section.split(" ", 1)[1]
         clients[name] = {"name": name, "type": "web", "repo": args.repo}
     if args.klipperscreen:
