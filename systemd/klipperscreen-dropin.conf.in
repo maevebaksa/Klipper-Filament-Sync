@@ -1,0 +1,2 @@
+[Service]
+ExecStartPre=/usr/bin/ln -sfn @@PANEL_ROOT@@/maeve_filaments.py @@KLIPPERSCREEN_ROOT@@/panels/maeve_filaments.py

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+node_modules/
+release-output/
+mainsail_frontend/mainsail.zip
+mainsail_source/mainsail-patched-source.tar.gz

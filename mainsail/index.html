@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#121212" />
+        <title>Filament | Mainsail</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <header>
+            <a class="back" href="/" aria-label="Back to Mainsail">&larr; Mainsail</a>
+            <h1>Filament</h1>
+            <button id="refresh" class="icon-button" type="button" aria-label="Refresh">&#x21bb;</button>
+        </header>
+        <main>
+            <div id="status" class="status" role="status">Connecting to Moonraker&hellip;</div>
+            <section id="tools" class="tool-grid" aria-live="polite"></section>
+        </main>
+        <template id="tool-template">
+            <article class="tool-card">
+                <div class="tool-heading">
+                    <div class="color-dot" aria-hidden="true"></div>
+                    <div>
+                        <h2></h2>
+                        <span class="dirty" aria-label="Unsaved changes">&bull;</span>
+                    </div>
+                </div>
+                <label>
+                    <span>Material</span>
+                    <select class="material"></select>
+                </label>
+                <div class="color-row">
+                    <label>
+                        <span>Color</span>
+                        <input class="color-picker" type="color" />
+                    </label>
+                    <label>
+                        <span>Hex</span>
+                        <input class="color-hex" type="text" maxlength="7" inputmode="text" />
+                    </label>
+                </div>
+                <div class="temperature-row">
+                    <label>
+                        <span>Nozzle &deg;C</span>
+                        <input class="nozzle-temp" type="number" min="0" max="350" step="1" />
+                    </label>
+                    <label>
+                        <span>Bed &deg;C</span>
+                        <input class="bed-temp" type="number" min="0" max="150" step="1" />
+                    </label>
+                </div>
+                <div class="actions">
+                    <button class="empty secondary" type="button">Empty</button>
+                    <button class="save primary" type="button">Save</button>
+                </div>
+            </article>
+        </template>
+        <script src="app.js"></script>
+    </body>
+</html>

@@ -1,0 +1,1033 @@
+diff --git a/src/components/dialogs/StartPrintDialog.vue b/src/components/dialogs/StartPrintDialog.vue
+index e7e9a3c..3911d38 100644
+--- a/src/components/dialogs/StartPrintDialog.vue
++++ b/src/components/dialogs/StartPrintDialog.vue
+@@ -13,6 +13,7 @@
+                     {{ question }}
+                 </p>
+             </v-card-text>
++            <start-print-dialog-toolchanger :file="file" :show-dialog="showDialog" />
+             <start-print-dialog-afc v-if="afcExists" :file="file" />
+             <start-print-dialog-mmu v-else-if="existsMmu" :file="file" />
+             <start-print-dialog-spoolman v-else-if="existsSpoolman" :file="file" />
+diff --git a/src/components/dialogs/StartPrintDialogToolchanger.vue b/src/components/dialogs/StartPrintDialogToolchanger.vue
+new file mode 100644
+index 0000000..f118814
+--- /dev/null
++++ b/src/components/dialogs/StartPrintDialogToolchanger.vue
+@@ -0,0 +1,263 @@
++<template>
++    <div v-if="hasVisibleFilaments">
++        <v-divider class="mt-3 mb-0" />
++        <v-card-title class="text-h5">Filament Assignment</v-card-title>
++        <v-card-text class="pb-0">
++            <p class="body-2">Filament change count: {{ filament_change_count }}</p>
++            <v-row>
++                <v-col v-for="filament in visibleFilaments" :key="filament.index" class="filament-box">
++                    <div
++                        class="filament-type"
++                        :style="{ backgroundColor: filament.color, color: getTextColor(filament.color) }">
++                        {{ filament.type }} ({{ filament.used }} g)
++                    </div>
++                    <v-menu offset-y>
++                        <template #activator="{ on, attrs }">
++                            <v-btn
++                                v-bind="attrs"
++                                class="tool-button"
++                                :style="{
++                                    backgroundColor: selectedTools[filament.index]?.color,
++                                    color: getTextColor(selectedTools[filament.index]?.color ?? '#000000'),
++                                }"
++                                v-on="on">
++                                {{ selectedTools[filament.index]?.label || 'Select Tool' }}
++                            </v-btn>
++                        </template>
++                        <v-list>
++                            <v-list-item
++                                v-for="tool in toolOptions"
++                                :key="tool.value"
++                                :style="{ backgroundColor: tool.color, color: getTextColor(tool.color) }"
++                                @click="selectTool(tool, filament.index)">
++                                {{ tool.label }}
++                            </v-list-item>
++                        </v-list>
++                    </v-menu>
++                </v-col>
++            </v-row>
++        </v-card-text>
++        <v-divider />
++    </div>
++</template>
++
++<script lang="ts">
++import { Component, Mixins, Prop, Watch } from 'vue-property-decorator'
++import BaseMixin from '@/components/mixins/base'
++import ToolchangerMixin from '@/components/mixins/toolchanger'
++import { convertStringToArray } from '@/plugins/helpers'
++import { FileStateGcodefile } from '@/store/files/types'
++
++interface FilamentAssignment {
++    color: string
++    index: number
++    type: string
++    used: number
++}
++
++interface ToolOption {
++    color: string
++    label: string
++    material: string
++    value: number
++}
++
++@Component
++export default class StartPrintDialogToolchanger extends Mixins(BaseMixin, ToolchangerMixin) {
++    @Prop({ required: true }) readonly file!: FileStateGcodefile
++    @Prop({ required: true }) readonly showDialog!: boolean
++
++    showChangeSpoolDialog = false
++    selectedTools: Array<ToolOption | null> = []
++    automaticMappingApplied = false
++
++    get filament_change_count(): number {
++        return this.file.filament_change_count ?? 0
++    }
++
++    get filaments(): FilamentAssignment[] {
++        const colors = this.file.filament_colors ?? []
++        const rawTypes = this.file.filament_type as string | string[] | undefined
++        const types = Array.isArray(rawTypes) ? rawTypes : convertStringToArray(rawTypes ?? '')
++        const used = this.file.filament_weights?.map(Number) ?? []
++
++        return colors.map((color: string, index: number) => ({
++            color,
++            index,
++            type: types[index] || 'Unknown',
++            used: used[index] || 0,
++        }))
++    }
++
++    get visibleFilaments(): FilamentAssignment[] {
++        return this.filaments.filter((filament) => filament.used > 0)
++    }
++
++    get toolOptions(): ToolOption[] {
++        const names = this.toolchangerToolNames ?? []
++        const materials = this.toolchangerFilamentTypes ?? []
++        const colors = this.toolchangerFilamentColors ?? []
++        if (materials.length < names.length || colors.length < names.length) return []
++        return names.map((name, index) => {
++            const material = materials[index] ?? 'Unknown'
++            return {
++                label: `${name.replace('tool', '').trim()} (${material})`,
++                material,
++                value: Number(name.match(/\d+/)?.[0] || 0),
++                color: colors[index] ?? '#000000',
++            }
++        })
++    }
++
++    get hasVisibleFilaments(): boolean {
++        return this.visibleFilaments.length > 1
++    }
++
++    mounted(): void {
++        this.applyAutomaticMapping()
++    }
++
++    @Watch('showDialog')
++    onShowDialogChange(val: boolean): void {
++        this.automaticMappingApplied = false
++        if (val) this.applyAutomaticMapping()
++    }
++
++    @Watch('filaments', { deep: true })
++    onFilamentsChange(): void {
++        this.applyAutomaticMapping()
++    }
++
++    @Watch('toolOptions', { deep: true })
++    onToolOptionsChange(): void {
++        this.applyAutomaticMapping()
++    }
++
++    applyAutomaticMapping(): void {
++        const fileMetadataReady = this.visibleFilaments.every(
++            (filament) => filament.type.trim() !== '' && filament.type.trim().toUpperCase() !== 'UNKNOWN'
++        )
++        if (
++            !this.showDialog ||
++            !this.hasVisibleFilaments ||
++            !fileMetadataReady ||
++            this.automaticMappingApplied ||
++            this.toolOptions.length === 0
++        )
++            return
++        this.automaticMappingApplied = true
++        this.doSend('RESET_TOOL_MAPPING')
++        this.matchToolsToFilaments()
++        this.selectedTools.forEach((tool, index) => {
++            if (tool && this.filaments[index].used > 0) {
++                this.doSend(`SET_TOOL_MAPPING T=${index} TOOL=${tool.value}`)
++            }
++        })
++    }
++
++    matchToolsToFilaments(): void {
++        this.selectedTools = this.filaments.map((filament) => this.findBestToolMatch(filament))
++    }
++
++    selectTool(tool: ToolOption, index: number): void {
++        if (!this.hasVisibleFilaments) return
++        this.doSend(`SET_TOOL_MAPPING T=${index} TOOL=${tool.value}`)
++        this.selectedTools[index] = tool
++    }
++
++    findBestToolMatch(filament: { color: string; type: string }): ToolOption | null {
++        const material = filament.type.trim().toUpperCase()
++        const matchingTools = this.toolOptions.filter((tool) => tool.material.trim().toUpperCase() === material)
++        let bestMatch: ToolOption | null = matchingTools[0] ?? null
++        let bestScore = Infinity
++
++        matchingTools.forEach((tool) => {
++            const colorDistance = this.calculateColorDistance(filament.color, tool.color)
++            if (colorDistance < bestScore) {
++                bestScore = colorDistance
++                bestMatch = tool
++            }
++        })
++
++        return bestMatch
++    }
++
++    calculateColorDistance(color1: string, color2: string): number {
++        const rgb1 = this.hexToRgb(color1)
++        const rgb2 = this.hexToRgb(color2)
++
++        if (!rgb1 || !rgb2) return Infinity
++
++        return Math.sqrt(Math.pow(rgb1.r - rgb2.r, 2) + Math.pow(rgb1.g - rgb2.g, 2) + Math.pow(rgb1.b - rgb2.b, 2))
++    }
++
++    hexToRgb(hex: string): { r: number; g: number; b: number } | null {
++        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})(?:[a-f\d]{2})?$/i.exec(hex)
++        return result
++            ? {
++                  r: parseInt(result[1], 16),
++                  g: parseInt(result[2], 16),
++                  b: parseInt(result[3], 16),
++              }
++            : null
++    }
++
++    getTextColor(backgroundColor: string): string {
++        const color = backgroundColor.charAt(0) === '#' ? backgroundColor.substring(1, 7) : backgroundColor
++        const r = parseInt(color.substring(0, 2), 16)
++        const g = parseInt(color.substring(2, 4), 16)
++        const b = parseInt(color.substring(4, 6), 16)
++        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
++        return luminance > 0.5 ? 'black' : 'white'
++    }
++}
++</script>
++
++<style scoped>
++.filament-box {
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    border: 1px solid var(--v-border-base);
++    border-radius: 10px;
++    padding: 10px;
++    margin: 5px;
++    background-color: var(--v-background-base);
++    width: 100%;
++}
++
++.filament-type {
++    font-weight: bold;
++    margin-bottom: 5px;
++    padding: 5px 10px;
++    border-radius: 5px;
++    color: white;
++    width: 100%;
++    text-align: center;
++}
++
++.tool-button {
++    width: 100%;
++    text-align: center;
++    padding: 5px 10px;
++    border-radius: 5px;
++    color: white;
++}
++
++.column-header {
++    font-weight: bold;
++    text-align: center;
++}
++
++.filament-details {
++    display: flex;
++    flex-direction: column;
++}
++
++.headline {
++    font-size: 1.5em;
++    font-weight: bold;
++    margin-bottom: 10px;
++    text-align: left;
++}
++</style>
+diff --git a/src/components/mixins/toolchanger.ts b/src/components/mixins/toolchanger.ts
+new file mode 100644
+index 0000000..e01992d
+--- /dev/null
++++ b/src/components/mixins/toolchanger.ts
+@@ -0,0 +1,67 @@
++import Vue from 'vue'
++import Component from 'vue-class-component'
++
++@Component
++export default class ToolchangerMixin extends Vue {
++    get enabled(): boolean {
++        return true
++    }
++    get toolchangerStatus(): string {
++        return this.$store.state.printer.toolchanger?.status
++    }
++
++    get toolchangerTool(): string {
++        return this.$store.state.printer.toolchanger?.tool
++    }
++
++    get toolchangerToolNumber(): number {
++        return this.$store.state.printer.toolchanger?.tool_number
++    }
++
++    get toolchangerToolNumbers(): number[] {
++        return this.$store.state.printer.toolchanger?.tool_numbers ?? []
++    }
++
++    get toolchangerToolNames(): string[] {
++        return this.$store.state.printer.toolchanger?.tool_names ?? []
++    }
++
++    get toolchangerFilamentTypes(): string[] {
++        const types = this.$store.state.printer.save_variables?.variables?.filament_types
++        return Array.isArray(types) ? types : []
++    }
++
++    get toolchangerFilamentTypesOptions(): string[] {
++        const options = this.$store.state.printer.save_variables?.variables?.filament_types_options
++        return Array.isArray(options) ? options : ['PLA', 'ABS', 'ASA', 'PETG', 'PA', 'PC', 'TPU']
++    }
++
++    get toolchangerFilamentColors(): string[] {
++        const colors = this.$store.state.printer.save_variables?.variables?.filament_colors
++        return Array.isArray(colors) ? colors : []
++    }
++
++    get toolchangerFilamentNozzleTemps(): number[] {
++        const temperatures = this.$store.state.printer.save_variables?.variables?.filament_nozzle_temps
++        return Array.isArray(temperatures) ? temperatures.map(Number) : []
++    }
++
++    get toolchangerFilamentBedTemps(): number[] {
++        const temperatures = this.$store.state.printer.save_variables?.variables?.filament_bed_temps
++        return Array.isArray(temperatures) ? temperatures.map(Number) : []
++    }
++
++    get filamentToolCount(): number {
++        const savedCount = Number(this.$store.state.printer.save_variables?.variables?.filament_tool_count ?? 0)
++        return Math.max(savedCount, this.toolchangerFilamentTypes.length, this.toolchangerFilamentColors.length, 1)
++    }
++
++    get toolMapping(): number[] {
++        return this.$store.state.printer.save_variables?.variables?.tool_map
++    }
++
++    doSend(gcode: string) {
++        this.$store.dispatch('server/addEvent', { message: gcode, type: 'command' })
++        this.$socket.emit('printer.gcode.script', { script: gcode })
++    }
++}
+diff --git a/src/components/panels/Toolchanger/ToolchangerPanelTools.vue b/src/components/panels/Toolchanger/ToolchangerPanelTools.vue
+new file mode 100644
+index 0000000..74e926d
+--- /dev/null
++++ b/src/components/panels/Toolchanger/ToolchangerPanelTools.vue
+@@ -0,0 +1,51 @@
++<template>
++    <div class="mb-3">
++        <v-row v-for="(row, index) in rows" :key="'row_' + index" class="mt-0" dense no-gutters>
++            <v-col v-for="name in row" :key="name" :style="columnStyle" class="pa-1">
++                <toolchanger-panel-tools-item :name="name" />
++            </v-col>
++        </v-row>
++    </div>
++</template>
++
++<script lang="ts">
++import { Component, Mixins } from 'vue-property-decorator'
++import BaseMixin from '@/components/mixins/base'
++import ToolchangerMixin from '@/components/mixins/toolchanger'
++
++@Component({})
++export default class ToolchangerPanel extends Mixins(BaseMixin, ToolchangerMixin) {
++    get displayToolNames(): string[] {
++        if (this.toolchangerToolNames.length > 0) return this.toolchangerToolNames
++        if (this.filamentToolCount === 1) return ['extruder']
++        return Array.from({ length: this.filamentToolCount }, (_unused, index) => `tool T${index}`)
++    }
++
++    get rows(): string[][] {
++        const len = this.displayToolNames.length
++        const cols = Math.ceil(len / Math.ceil(len / 5))
++        const rows: string[][] = []
++
++        for (let i = 0; i < len; i += cols) {
++            rows.push(this.displayToolNames.slice(i, i + cols))
++        }
++
++        return rows
++    }
++
++    get columnStyle(): string {
++        return `max-width: ${100 / Math.min(this.displayToolNames.length, 5)}%`
++    }
++}
++</script>
++
++<style scoped>
++._tool-group {
++    border-radius: 4px;
++    display: inline-flex;
++    flex-wrap: nowrap;
++    max-width: 100%;
++    min-width: 100%;
++    margin: auto;
++}
++</style>
+diff --git a/src/components/panels/Toolchanger/ToolchangerPanelToolsItem.vue b/src/components/panels/Toolchanger/ToolchangerPanelToolsItem.vue
+new file mode 100644
+index 0000000..0166d71
+--- /dev/null
++++ b/src/components/panels/Toolchanger/ToolchangerPanelToolsItem.vue
+@@ -0,0 +1,365 @@
++<template>
++    <div
++        :class="[
++            'flex-grow-1 toolchanger-tool',
++            { active: isActive, changing: isChanging && isActive, 'single-filament': !hasToolchanger },
++        ]">
++        <div class="tool-name">{{ name.toUpperCase() }}</div>
++        <div class="nozzle-info">
++            <v-icon small>{{ mdiPrinter3dNozzle }}</v-icon>
++            <span>{{ nozzleDiameter }} mm</span>
++        </div>
++        <div class="filament-info">
++            <div class="spool-control">
++                <spool-icon
++                    class="spool-icon"
++                    :color="draftColor"
++                    :white-details="true"
++                    @click-spool="openColorPicker"></spool-icon>
++                <v-menu v-model="showColorPicker" :close-on-content-click="false" offset-y>
++                    <template #activator="{ on, attrs }">
++                        <div v-bind="attrs" v-on="on"></div>
++                    </template>
++                    <v-card>
++                        <v-color-picker v-model="draftColor" hide-mode-switch mode="hexa" />
++                        <v-card-actions>
++                            <v-btn text @click="cancelColorPicker">{{ $t('Buttons.Cancel') }}</v-btn>
++                            <v-spacer />
++                            <v-btn color="primary" text @click="saveColorPicker">{{ $t('Buttons.Save') }}</v-btn>
++                        </v-card-actions>
++                    </v-card>
++                </v-menu>
++            </div>
++            <v-select
++                v-model="draftMaterial"
++                class="filament-field"
++                :items="filamentTypes"
++                :label="$t('Panels.ToolchangerPanel.Material')"
++                @change="saveFilament" />
++            <v-row class="filament-temperatures" dense>
++                <v-col cols="6">
++                    <v-text-field
++                        v-model.number="draftNozzleTemp"
++                        :label="$t('Panels.ToolchangerPanel.NozzleTemperature')"
++                        type="number"
++                        min="0"
++                        max="350"
++                        suffix="°C"
++                        @change="saveFilament" />
++                </v-col>
++                <v-col cols="6">
++                    <v-text-field
++                        v-model.number="draftBedTemp"
++                        :label="$t('Panels.ToolchangerPanel.BedTemperature')"
++                        type="number"
++                        min="0"
++                        max="150"
++                        suffix="°C"
++                        @change="saveFilament" />
++                </v-col>
++            </v-row>
++            <v-text-field
++                v-if="hasToolchanger"
++                class="filament-field"
++                :value="pressureAdvance"
++                :label="$t('Panels.ToolchangerPanel.PressureAdvance')"
++                type="number"
++                step="0.01"
++                @change="savePressureAdvance" />
++        </div>
++
++        <div v-if="hasToolchanger" class="tool-buttons">
++            <v-btn
++                small
++                :disabled="printerIsPrintingOnly"
++                @click="doSend(`LOAD_ONE_FILAMENT TOOL=${toolNumber} MATERIAL=${draftMaterial}`)">
++                <v-icon left small>{{ mdiRedoVariant }}</v-icon>
++                {{ $t('LOAD', { isDefault: '' }) }}
++            </v-btn>
++            <v-btn
++                small
++                :disabled="printerIsPrintingOnly"
++                @click="doSend(`UNLOAD_ONE_FILAMENT TOOL=${toolNumber} MATERIAL=${draftMaterial}`)">
++                <v-icon left small>{{ mdiUndoVariant }}</v-icon>
++                {{ $t('UNLOAD', { isDefault: '' }) }}
++            </v-btn>
++            <v-btn small :disabled="printerIsPrintingOnly" @click="doSend(`T${toolNumber}`)">
++                <v-icon left small>{{ mdiTargetVariant }}</v-icon>
++                {{ $t('ACTIVATE', { isDefault: '' }) }}
++            </v-btn>
++        </div>
++        <div v-else-if="hasProfileLoadUnload" class="tool-buttons">
++            <v-btn small :disabled="printerIsPrintingOnly || draftMaterial === 'EMPTY'" @click="loadFilament">
++                <v-icon left small>{{ mdiRedoVariant }}</v-icon>
++                {{ $t('LOAD', { isDefault: '' }) }}
++            </v-btn>
++            <v-btn small :disabled="printerIsPrintingOnly" @click="unloadFilament">
++                <v-icon left small>{{ mdiUndoVariant }}</v-icon>
++                {{ $t('UNLOAD', { isDefault: '' }) }}
++            </v-btn>
++        </div>
++    </div>
++</template>
++
++<script lang="ts">
++import { Component, Mixins, Prop, Watch } from 'vue-property-decorator'
++import BaseMixin from '@/components/mixins/base'
++import ToolchangerMixin from '@/components/mixins/toolchanger'
++import ExtruderMixin from '@/components/mixins/extruder'
++import { mdiUndoVariant, mdiRedoVariant, mdiTargetVariant, mdiPrinter3dNozzle } from '@mdi/js'
++
++@Component
++export default class ToolchangerPanel extends Mixins(BaseMixin, ExtruderMixin, ToolchangerMixin) {
++    @Prop({ type: String, required: true }) readonly name!: string
++    mdiUndoVariant = mdiUndoVariant
++    mdiRedoVariant = mdiRedoVariant
++    mdiTargetVariant = mdiTargetVariant
++    mdiPrinter3dNozzle = mdiPrinter3dNozzle
++    showColorPicker = false
++    draftColor = '#000000'
++    draftMaterial = 'EMPTY'
++    draftNozzleTemp = 0
++    draftBedTemp = 0
++
++    get filamentTypes(): string[] {
++        return Array.from(new Set(['EMPTY', ...this.toolchangerFilamentTypesOptions]))
++    }
++
++    get savedColor(): string {
++        return this.normalizeColor(this.toolchangerFilamentColors[this.toolNumber])
++    }
++
++    get savedMaterial(): string {
++        const material = String(this.toolchangerFilamentTypes[this.toolNumber] ?? '')
++            .trim()
++            .toUpperCase()
++        return ['', 'EMPTY', 'NONE', 'UNKNOWN', 'UNSET'].includes(material) ? 'EMPTY' : material
++    }
++
++    get savedNozzleTemp(): number {
++        return this.clampTemperature(this.toolchangerFilamentNozzleTemps[this.toolNumber], 350)
++    }
++
++    get savedBedTemp(): number {
++        return this.clampTemperature(this.toolchangerFilamentBedTemps[this.toolNumber], 150)
++    }
++
++    get hasToolchanger(): boolean {
++        return this.toolchangerToolNames.length > 0
++    }
++
++    get hasProfileLoadUnload(): boolean {
++        return (
++            this.$store.state.printer?.['gcode_macro LOAD_FILAMENT'] !== undefined &&
++            this.$store.state.printer?.['gcode_macro UNLOAD_FILAMENT'] !== undefined
++        )
++    }
++
++    get isActive(): boolean {
++        return this.toolchangerTool === this.name
++    }
++
++    get isChanging(): boolean {
++        return this.toolchangerStatus === 'changing'
++    }
++
++    get toolNumber(): number {
++        return Number(`${this.name.replace(/\D/g, '')}`)
++    }
++
++    get tCommand(): string {
++        return `T${this.toolNumber}`
++    }
++
++    get nozzleDiameter(): number {
++        return this.extruders[this.toolNumber]?.nozzleDiameter ?? this.extruders[0]?.nozzleDiameter ?? 0.4
++    }
++
++    get pressureAdvance(): number {
++        if (this.$store.state.printer?.[`gcode_macro ${this.tCommand}`]?.pressure_advance != null) {
++            return this.$store.state.printer?.[`gcode_macro ${this.tCommand}`]?.pressure_advance
++        } else {
++            const extruder = this.extruders[this.toolNumber] ?? this.extruders[0]
++            return this.$store.state.printer?.[extruder?.key]?.pressure_advance ?? 0
++        }
++    }
++
++    @Watch('savedColor', { immediate: true })
++    onSavedColorChange(value: string): void {
++        if (!this.showColorPicker) this.draftColor = value
++    }
++
++    @Watch('savedMaterial', { immediate: true })
++    onSavedMaterialChange(value: string): void {
++        this.draftMaterial = value
++    }
++
++    @Watch('savedNozzleTemp', { immediate: true })
++    onSavedNozzleTempChange(value: number): void {
++        this.draftNozzleTemp = value
++    }
++
++    @Watch('savedBedTemp', { immediate: true })
++    onSavedBedTempChange(value: number): void {
++        this.draftBedTemp = value
++    }
++
++    normalizeColor(value: unknown): string {
++        const color = String(value ?? '')
++            .trim()
++            .replace(/^#/, '')
++            .slice(0, 6)
++            .toUpperCase()
++        return /^[0-9A-F]{6}$/.test(color) ? `#${color}` : '#000000'
++    }
++
++    clampTemperature(value: unknown, maximum: number): number {
++        const temperature = Number.parseInt(String(value ?? 0), 10)
++        if (!Number.isFinite(temperature)) return 0
++        return Math.max(0, Math.min(maximum, temperature))
++    }
++
++    openColorPicker(): void {
++        this.draftColor = this.savedColor
++        this.showColorPicker = true
++    }
++
++    cancelColorPicker(): void {
++        this.draftColor = this.savedColor
++        this.showColorPicker = false
++    }
++
++    saveColorPicker(): void {
++        this.showColorPicker = false
++        this.saveFilament()
++    }
++
++    saveFilament(): void {
++        if (this.draftMaterial === 'EMPTY') {
++            this.doSend(`SET_TOOL_FILAMENT TOOL=${this.toolNumber} EMPTY=1 QUIET=1`)
++            return
++        }
++        const color = this.normalizeColor(this.draftColor).slice(1)
++        const nozzleTemp = this.clampTemperature(this.draftNozzleTemp, 350)
++        const bedTemp = this.clampTemperature(this.draftBedTemp, 150)
++        this.doSend(
++            `SET_TOOL_FILAMENT TOOL=${this.toolNumber} MATERIAL=${this.draftMaterial} COLOR=${color} ` +
++                `NOZZLE_TEMP=${nozzleTemp} BED_TEMP=${bedTemp} QUIET=1`
++        )
++    }
++
++    savePressureAdvance(value: string): void {
++        this.doSend(`SET_PRESSURE_ADVANCE TOOL=${this.toolNumber} VALUE=${value}`)
++    }
++
++    loadFilament(): void {
++        this.doSend(`LOAD_FILAMENT TOOLHEAD=${this.toolNumber}`)
++    }
++
++    unloadFilament(): void {
++        this.doSend(`UNLOAD_FILAMENT TOOLHEAD=${this.toolNumber}`)
++    }
++}
++</script>
++
++<style scoped>
++.toolchanger-tool {
++    margin: 1%;
++    border-radius: 10px;
++    background-color: var(--v-background-base);
++    transition: background-color 0.3s ease;
++    text-align: center;
++    padding: auto;
++    position: relative;
++}
++
++.toolchanger-tool.active {
++    border: 3px solid var(--v-primary-base);
++}
++
++.toolchanger-tool.changing::before {
++    content: '';
++    position: absolute;
++    top: -2px;
++    right: -2px;
++    bottom: -2px;
++    left: -2px;
++    border: 2px solid #ff9800;
++    border-radius: 10px;
++    animation: flash-border 1s linear infinite;
++}
++
++@keyframes flash-border {
++    0% {
++        border-color: #ff9800;
++    }
++    50% {
++        border-color: #ff0000;
++    }
++    100% {
++        border-color: #ff9800;
++    }
++}
++
++.tool-name {
++    font-weight: bold;
++}
++
++.nozzle-info {
++    display: flex;
++    align-items: center;
++    justify-content: center;
++}
++
++.filament-info {
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    justify-content: center;
++}
++
++.spool-icon {
++    width: 64px;
++    height: 64px;
++    margin: 12px auto;
++}
++
++.filament-field,
++.filament-temperatures {
++    width: 80%;
++}
++
++.tool-buttons {
++    display: flex;
++    flex-direction: column;
++    gap: 5px;
++    margin: 10%;
++}
++
++@media (orientation: portrait) {
++    .toolchanger-tool {
++        margin: 4px;
++        border-radius: 4px;
++    }
++
++    .single-filament .filament-info {
++        display: grid;
++        grid-template-columns: 80px minmax(0, 1fr);
++        column-gap: 12px;
++        width: 100%;
++        padding: 0 12px 8px;
++    }
++
++    .single-filament .spool-control {
++        grid-row: 1 / 3;
++        grid-column: 1;
++        align-self: start;
++    }
++
++    .single-filament .filament-field,
++    .single-filament .filament-temperatures {
++        grid-column: 2;
++        width: 100%;
++    }
++}
++</style>
+diff --git a/src/components/panels/ToolchangerPanel.vue b/src/components/panels/ToolchangerPanel.vue
+new file mode 100644
+index 0000000..fe85462
+--- /dev/null
++++ b/src/components/panels/ToolchangerPanel.vue
+@@ -0,0 +1,77 @@
++<template>
++    <div>
++        <panel
++            v-if="klipperReadyForGui"
++            :icon="mdiSwapVerticalBold"
++            :title="panelTitle"
++            :collapsible="true"
++            card-class="toolchanger-panel">
++            <template v-if="hasToolchanger" #buttons>
++                <v-menu left offset-y :close-on-content-click="false">
++                    <template #activator="{ on, attrs }">
++                        <v-btn icon tile v-bind="attrs" v-on="on">
++                            <v-icon>{{ mdiDotsVertical }}</v-icon>
++                        </v-btn>
++                    </template>
++                    <v-list dense>
++                        <v-list-item>
++                            <v-btn
++                                small
++                                style="width: 100%"
++                                :disabled="printerIsPrinting"
++                                @click="sendCmd('INITIALIZE_TOOLCHANGER')">
++                                <v-icon left small>{{ mdiSwapVerticalBold }}</v-icon>
++                                {{ $t('Panels.ToolchangerPanel.Initialize', { isDefault: '' }) }}
++                            </v-btn>
++                        </v-list-item>
++                        <v-list-item>
++                            <v-btn
++                                small
++                                style="width: 100%"
++                                :disabled="printerIsPrintingOnly"
++                                @click="sendCmd('UNSELECT_TOOL')">
++                                <v-icon left small>{{ mdiArrowUpBold }}</v-icon>
++                                {{ $t('Panels.ToolchangerPanel.Unselect', { isDefault: '' }) }}
++                            </v-btn>
++                        </v-list-item>
++                    </v-list>
++                </v-menu>
++            </template>
++            <toolchanger-panel-tools />
++        </panel>
++    </div>
++</template>
++
++<script lang="ts">
++import { Component, Mixins } from 'vue-property-decorator'
++import BaseMixin from '@/components/mixins/base'
++import ToolchangerMixin from '@/components/mixins/toolchanger'
++import { mdiArrowUpBold, mdiDotsVertical, mdiSwapVerticalBold } from '@mdi/js'
++import Panel from '@/components/ui/Panel.vue'
++import { Debounce } from 'vue-debounce-decorator'
++
++@Component({
++    components: { Panel },
++})
++export default class ToolchangerPanel extends Mixins(BaseMixin, ToolchangerMixin) {
++    mdiSwapVerticalBold = mdiSwapVerticalBold
++    mdiDotsVertical = mdiDotsVertical
++    mdiArrowUpBold = mdiArrowUpBold
++
++    get hasToolchanger(): boolean {
++        return this.toolchangerToolNames.length > 0
++    }
++
++    get panelTitle(): string {
++        return this.$t(
++            this.hasToolchanger ? 'Panels.ToolchangerPanel.Headline' : 'Panels.ToolchangerPanel.FilamentHeadline'
++        ).toString()
++    }
++
++    @Debounce(500)
++    sendCmd(gcode: string): void {
++        this.$store.dispatch('server/addEvent', { message: gcode, type: 'command' })
++        this.$socket.emit('printer.gcode.script', { script: gcode })
++    }
++}
++</script>
+diff --git a/src/components/ui/SpoolIcon.vue b/src/components/ui/SpoolIcon.vue
+index 29ecb3c..b605b24 100644
+--- a/src/components/ui/SpoolIcon.vue
++++ b/src/components/ui/SpoolIcon.vue
+@@ -69,6 +69,9 @@ export default class SpoolIcon extends Mixins(BaseMixin) {
+     @Prop({ required: false, default: '#ff0' })
+     declare readonly color: string
+ 
++    @Prop({ type: Boolean, required: false, default: false })
++    declare readonly whiteDetails: boolean
++
+     @Prop({ type: String, required: false })
+     declare readonly multiColorHexes: string | undefined
+ 
+@@ -104,11 +107,11 @@ export default class SpoolIcon extends Mixins(BaseMixin) {
+     }
+ 
+     get styleCircle2() {
+-        return { fill: '#bebebe' }
++        return { fill: this.whiteDetails ? '#ffffff' : '#bebebe' }
+     }
+ 
+     get styleCircle3() {
+-        return { fill: '#343434' }
++        return { fill: this.whiteDetails ? '#ffffff' : '#343434' }
+     }
+ 
+     get radialSegments(): RadialSegment[] {
+diff --git a/src/locales/en.json b/src/locales/en.json
+index 538ceb4..7ebc70d 100644
+--- a/src/locales/en.json
++++ b/src/locales/en.json
+@@ -1052,6 +1052,19 @@
+             "TemperaturesInChart": "Temperature [°C]",
+             "TurnHeaterOff": "Turn Heater Off"
+         },
++        "ToolCalibrationPanel": {
++            "Headline": "Tool calibration"
++        },
++        "ToolchangerPanel": {
++            "BedTemperature": "Bed temperature",
++            "FilamentHeadline": "Filament",
++            "Headline": "Toolchanger",
++            "Initialize": "Initialize Toolchanger",
++            "Material": "Material",
++            "NozzleTemperature": "Nozzle temperature",
++            "PressureAdvance": "Pressure advance",
++            "Unselect": "Dock active tool"
++        },
+         "ToolheadControlPanel": {
+             "Absolute": "absolute",
+             "ALL": "ALL",
+@@ -1105,6 +1118,7 @@
+         "Machine": "Machine",
+         "Printers": "Printers",
+         "Timelapse": "Timelapse",
++        "Tool calibration": "Tool calibration",
+         "Webcam": "Webcam"
+     },
+     "ScrewsTiltAdjust": {
+diff --git a/src/pages/Dashboard.vue b/src/pages/Dashboard.vue
+index 7327676..7e841cd 100644
+--- a/src/pages/Dashboard.vue
++++ b/src/pages/Dashboard.vue
+@@ -12,7 +12,7 @@
+             </v-col>
+         </v-row>
+         <v-row v-else-if="isTablet">
+-            <v-col class="col-6">
++            <v-col class="col-6 dashboard-portrait-column">
+                 <status-panel />
+                 <template v-for="component in tabletLayout1">
+                     <component
+@@ -21,7 +21,7 @@
+                         :panel-id="extractPanelId(component.name)"></component>
+                 </template>
+             </v-col>
+-            <v-col class="col-6">
++            <v-col class="col-6 dashboard-portrait-column">
+                 <template v-for="component in tabletLayout2">
+                     <component
+                         :is="extractPanelName(component.name)"
+@@ -31,7 +31,7 @@
+             </v-col>
+         </v-row>
+         <v-row v-else-if="isDesktop">
+-            <v-col class="col-5">
++            <v-col class="col-5 dashboard-portrait-column">
+                 <status-panel />
+                 <template v-for="component in desktopLayout1">
+                     <component
+@@ -40,7 +40,7 @@
+                         :panel-id="extractPanelId(component.name)"></component>
+                 </template>
+             </v-col>
+-            <v-col class="col-7">
++            <v-col class="col-7 dashboard-portrait-column">
+                 <template v-for="component in desktopLayout2">
+                     <component
+                         :is="extractPanelName(component.name)"
+@@ -50,7 +50,7 @@
+             </v-col>
+         </v-row>
+         <v-row v-else-if="isWidescreen">
+-            <v-col class="col-3">
++            <v-col class="col-3 dashboard-portrait-column">
+                 <status-panel />
+                 <template v-for="component in widescreenLayout1">
+                     <component
+@@ -59,7 +59,7 @@
+                         :panel-id="extractPanelId(component.name)"></component>
+                 </template>
+             </v-col>
+-            <v-col class="col-5">
++            <v-col class="col-5 dashboard-portrait-column">
+                 <template v-for="component in widescreenLayout2">
+                     <component
+                         :is="extractPanelName(component.name)"
+@@ -67,7 +67,7 @@
+                         :panel-id="extractPanelId(component.name)"></component>
+                 </template>
+             </v-col>
+-            <v-col class="col-4">
++            <v-col class="col-4 dashboard-portrait-column">
+                 <template v-for="component in widescreenLayout3">
+                     <component
+                         :is="extractPanelName(component.name)"
+@@ -96,6 +96,7 @@ import MiscellaneousPanel from '@/components/panels/MiscellaneousPanel.vue'
+ import SpoolmanPanel from '@/components/panels/SpoolmanPanel.vue'
+ import MmuPanel from '@/components/panels/MmuPanel.vue'
+ import StatusPanel from '@/components/panels/StatusPanel.vue'
++import ToolchangerPanel from '@/components/panels/ToolchangerPanel.vue'
+ import ToolheadControlPanel from '@/components/panels/ToolheadControlPanel.vue'
+ import TemperaturePanel from '@/components/panels/TemperaturePanel.vue'
+ import WebcamPanel from '@/components/panels/WebcamPanel.vue'
+@@ -115,6 +116,7 @@ import WebcamPanel from '@/components/panels/WebcamPanel.vue'
+         SpoolmanPanel,
+         MmuPanel,
+         StatusPanel,
++        ToolchangerPanel,
+         ToolheadControlPanel,
+         TemperaturePanel,
+         WebcamPanel,
+@@ -162,3 +164,12 @@ export default class PageDashboard extends Mixins(DashboardMixin) {
+     }
+ }
+ </script>
++
++<style scoped>
++@media (orientation: portrait) {
++    .dashboard-portrait-column {
++        flex: 0 0 100%;
++        max-width: 100%;
++    }
++}
++</style>
+diff --git a/src/store/variables.ts b/src/store/variables.ts
+index 1646c77..b5df261 100644
+--- a/src/store/variables.ts
++++ b/src/store/variables.ts
+@@ -119,6 +119,7 @@ export const allDashboardPanels = [
+     'miscellaneous',
+     'spoolman',
+     'mmu',
++    'toolchanger',
+     'temperature',
+     'webcam',
+ ]

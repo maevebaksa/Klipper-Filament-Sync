@@ -1,0 +1,12 @@
+[Unit]
+Description=Detect upstream Mainsail updates and rebuild filament-sync frontend
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=filament-sync-mainsail-guard.service
+
+[Install]
+WantedBy=timers.target

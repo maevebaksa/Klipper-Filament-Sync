@@ -1,0 +1,101 @@
+name: Build patched Mainsail releases
+
+on:
+  schedule:
+    - cron: '19 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Optional stable upstream tag, e.g. v2.19.0 (blank = latest)'
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths: ['VERSION', 'mainsail_source/filament-sync.patch', 'ci/**', 'tests/**', '*.py', '*.sh', 'systemd/**', 'klipperscreen/**', '.github/workflows/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filament-sync-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate installer, scheduler and panel syntax
+        run: |
+          bash -n install.sh verify.sh
+          python3 -m py_compile klipperscreen/maeve_filaments.py
+          python3 -m unittest discover -s tests -v
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      source_tag: ${{ steps.plan.outputs.source_tag }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      latest: ${{ steps.plan.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPO: ${{ github.repository }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: python3 ci/build.py plan --repo "$RELEASE_REPO" --upstream-tag "$UPSTREAM_TAG"
+  build:
+    needs: [plan, validate]
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile and validate patched upstream
+        env:
+          RELEASE_REPO: ${{ github.repository }}
+          UPSTREAM_TAG: ${{ needs.plan.outputs.source_tag }}
+          UPSTREAM_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: python3 ci/build.py build --repo "$RELEASE_REPO" --upstream-tag "$UPSTREAM_TAG" --source-sha "$UPSTREAM_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-output/*
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-output
+      - name: Publish only after every build gate succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          UPSTREAM_TAG: ${{ needs.plan.outputs.source_tag }}
+          MAKE_LATEST: ${{ needs.plan.outputs.latest }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          cd release-output
+          sha256sum --check SHA256SUMS
+          gh release create "$RELEASE_TAG" --target "$TARGET_SHA" --title "$RELEASE_TAG" --notes "Filament-sync unified frontend built from official Mainsail $UPSTREAM_TAG. See build-manifest.json for source and patch identity." --draft
+          gh release upload "$RELEASE_TAG" mainsail.zip
+          gh release upload "$RELEASE_TAG" filament-sync-unified-*.tar.gz mainsail-patched-source.tar.gz build-manifest.json SHA256SUMS
+          gh release edit "$RELEASE_TAG" --draft=false --latest="$MAKE_LATEST"

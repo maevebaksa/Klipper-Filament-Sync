@@ -1,0 +1,14 @@
+[Unit]
+Description=Rebuild filament-sync frontend after Mainsail updates
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@@USER@@
+ExecStart=/usr/bin/python3 @@INSTALL_ROOT@@/rebuild_mainsail.py --mainsail-root @@MAINSAIL_ROOT@@ --config-root @@CONFIG_ROOT@@ --install-root @@INSTALL_ROOT@@
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
