@@ -354,10 +354,10 @@ index 0000000..e01992d
 +}
 diff --git a/src/components/panels/ToolCalibrationPanel.vue b/src/components/panels/ToolCalibrationPanel.vue
 new file mode 100644
-index 0000000..e67df93
+index 0000000..6b2fa41
 --- /dev/null
 +++ b/src/components/panels/ToolCalibrationPanel.vue
-@@ -0,0 +1,257 @@
+@@ -0,0 +1,333 @@
 +<template>
 +    <panel
 +        :icon="mdiAdjust"
@@ -385,6 +385,9 @@ index 0000000..e67df93
 +                <v-col cols="12" md="4">
 +                    <p>{{ $t('Panels.ToolCalibrationPanel.SafeHeight', { z: format(safeZ) }) }}</p>
 +                    <p>{{ $t('Panels.ToolCalibrationPanel.CameraPosition', { xyz: cameraPosition }) }}</p>
++                    <v-btn class="mr-2 mb-2" :disabled="!klipperReadyForGui || busy" @click="refreshStatus">
++                        {{ $t('Panels.ToolCalibrationPanel.RefreshStatus') }}
++                    </v-btn>
 +                    <v-btn class="mr-2 mb-2" :disabled="!controls.query" @click="send('AXISCOPE_QUERY_PROBE')">
 +                        {{ $t('Panels.ToolCalibrationPanel.QueryProbe') }}
 +                    </v-btn>
@@ -408,6 +411,21 @@ index 0000000..e67df93
 +                        {{ $t('Panels.ToolCalibrationPanel.Calibrate') }}
 +                    </v-btn>
 +                    <p>{{ stateText }}</p>
++                    <div
++                        v-if="
++                            status.camera_adjustment && status.xy_state === 'awaiting_confirmation' && cameraTool !== 0
++                        ">
++                        <p class="text-caption">{{ $t('Panels.ToolCalibrationPanel.TrimNotice') }}</p>
++                        <v-btn
++                            v-for="step in trimSteps"
++                            :key="step.label"
++                            small
++                            class="mr-2 mb-2"
++                            :disabled="!controls.adjust || !camera || !cameraMatchesReference"
++                            @click="adjust(step.x, step.y)">
++                            {{ $t('Panels.ToolCalibrationPanel.TrimStep', { axis: step.label }) }}
++                        </v-btn>
++                    </div>
 +                    <v-btn
 +                        class="mr-2 mb-2"
 +                        color="success"
@@ -454,7 +472,7 @@ index 0000000..e67df93
 +</template>
 +
 +<script lang="ts">
-+import { Component, Mixins } from 'vue-property-decorator'
++import { Component, Mixins, Watch } from 'vue-property-decorator'
 +import { mdiAdjust } from '@mdi/js'
 +import BaseMixin from '@/components/mixins/base'
 +import Panel from '@/components/ui/Panel.vue'
@@ -465,10 +483,16 @@ index 0000000..e67df93
 +@Component({ components: { Panel, WebcamWrapper } })
 +export default class ToolCalibrationPanel extends Mixins(BaseMixin) {
 +    mdiAdjust = mdiAdjust
-+    cameraName = ''
++    trimSteps = [
++        { label: 'X−', x: -0.05, y: 0 },
++        { label: 'X+', x: 0.05, y: 0 },
++        { label: 'Y−', x: 0, y: -0.05 },
++        { label: 'Y+', x: 0, y: 0.05 },
++    ]
 +    busy = false
 +    error = ''
-+    capturedCameraName = ''
++    statusLoaded = false
++    statusRequest = 0
 +
 +    get status(): AxiscopeStatus {
 +        return this.$store.state.printer.axiscope ?? {}
@@ -481,7 +505,7 @@ index 0000000..e67df93
 +
 +    get controls() {
 +        return axiscopeControls(this.status, {
-+            ready: this.klipperReadyForGui,
++            ready: this.klipperReadyForGui && this.statusLoaded,
 +            busy: this.busy,
 +            printing: this.printerIsPrinting,
 +            homedAxes: this.$store.state.printer.toolhead?.homed_axes ?? '',
@@ -502,6 +526,14 @@ index 0000000..e67df93
 +        )
 +    }
 +
++    get cameraName(): string {
++        return this.$store.state.gui.view.webcam.currentCam.toolcalibration ?? ''
++    }
++
++    get capturedCameraName(): string {
++        return this.$store.state.gui.view.webcam.currentCam['toolcalibration-reference'] ?? ''
++    }
++
 +    get camera(): GuiWebcamStateWebcam | undefined {
 +        const camera =
 +            this.webcams.find((camera) => camera.name === this.cameraName) ??
@@ -520,7 +552,7 @@ index 0000000..e67df93
 +    }
 +
 +    set currentCameraName(name: string) {
-+        this.cameraName = name
++        this.$store.dispatch('gui/setCurrentWebcam', { page: 'toolcalibration', value: name })
 +    }
 +
 +    get canCalibrate(): boolean {
@@ -563,8 +595,10 @@ index 0000000..e67df93
 +    get hint(): string {
 +        const prefix = 'Panels.ToolCalibrationPanel.'
 +        if (!this.klipperReadyForGui) return this.$t(prefix + 'NotReady').toString()
++        if (!this.statusLoaded) return this.$t(prefix + 'Restoring').toString()
 +        if (this.status.automatic_xy === undefined) return this.$t(prefix + 'UpgradeBackend').toString()
 +        if (!this.status.automatic_xy) return this.$t(prefix + 'ConfigurePin').toString()
++        if (this.busy) return this.$t(prefix + 'Working').toString()
 +        if (this.printerIsPrinting) return this.$t(prefix + 'Printing').toString()
 +        if (this.safeZ === null) return this.$t(prefix + 'ConfigureSafeZ').toString()
 +        const captureZ = this.$store.state.printer.toolhead?.position?.[2]
@@ -575,7 +609,48 @@ index 0000000..e67df93
 +        if (this.$store.state.printer.toolhead?.homed_axes !== 'xyz') return this.$t(prefix + 'HomeFirst').toString()
 +        if (this.$store.state.printer.bed_mesh?.profile_name) return this.$t(prefix + 'ClearMesh').toString()
 +        if (!this.cameraMatchesReference) return this.$t(prefix + 'CameraChanged').toString()
++        if (this.status.xy_state === 'awaiting_confirmation' && !this.controls.confirm)
++            return this.$t(prefix + 'ReturnToCamera', { tool: this.cameraTool }).toString()
 +        return ''
++    }
++
++    @Watch('klipperReadyForGui', { immediate: true })
++    onReady(ready: boolean): void {
++        this.statusLoaded = false
++        if (ready) void this.refreshStatus()
++        else this.statusRequest++
++    }
++
++    beforeDestroy(): void {
++        this.statusRequest++
++    }
++
++    async refreshStatus(): Promise<void> {
++        const request = ++this.statusRequest
++        this.statusLoaded = false
++        try {
++            const result = await this.$socket.emitAndWait('printer.objects.query', {
++                objects: { axiscope: null, toolhead: null, toolchanger: null, bed_mesh: null },
++            })
++            if (request !== this.statusRequest || !this.klipperReadyForGui) return
++            await this.$store.dispatch('printer/getData', result)
++            this.statusLoaded = true
++        } catch (error) {
++            if (request !== this.statusRequest) return
++            const message = typeof error === 'object' && error !== null && 'message' in error ? error.message : error
++            this.error =
++                typeof message === 'string' ? message : this.$t('Panels.ToolCalibrationPanel.RestoreFailed').toString()
++        }
++    }
++
++    rememberCamera(name: string): void {
++        this.currentCameraName = name
++        this.$store.dispatch('gui/setCurrentWebcam', { page: 'toolcalibration-reference', value: name })
++    }
++
++    async adjust(x: number, y: number): Promise<void> {
++        if (!this.controls.adjust || !this.camera || !this.cameraMatchesReference) return
++        await this.send('AXISCOPE_ADJUST_CAMERA X=' + x + ' Y=' + y)
 +    }
 +
 +    format(value: number | null | undefined): string {
@@ -585,12 +660,12 @@ index 0000000..e67df93
 +    async capture(): Promise<void> {
 +        if (!this.controls.capture || !this.camera) return
 +        const cameraName = this.camera.name
-+        if (await this.send('AXISCOPE_SET_CAMERA_POSITION CURRENT=1')) this.capturedCameraName = cameraName
++        if (await this.send('AXISCOPE_SET_CAMERA_POSITION CURRENT=1')) this.rememberCamera(cameraName)
 +    }
 +
 +    async calibrate(): Promise<void> {
 +        if (!this.canCalibrate) return
-+        this.capturedCameraName = this.camera!.name
++        this.rememberCamera(this.camera!.name)
 +        await this.send('CALIBRATE_ALL_XY_OFFSETS CAMERA_CHECK=1 SAVE=1 INCLUDE_Z=0')
 +    }
 +
@@ -610,6 +685,7 @@ index 0000000..e67df93
 +                    : this.$t('Panels.ToolCalibrationPanel.CommandFailed').toString()
 +            return false
 +        } finally {
++            await this.refreshStatus()
 +            this.busy = false
 +        }
 +    }
@@ -1155,10 +1231,10 @@ index 29ecb3c..b605b24 100644
  
      get radialSegments(): RadialSegment[] {
 diff --git a/src/locales/en.json b/src/locales/en.json
-index 538ceb4..d943035 100644
+index 538ceb4..89bf49a 100644
 --- a/src/locales/en.json
 +++ b/src/locales/en.json
-@@ -1052,6 +1052,56 @@
+@@ -1052,6 +1052,63 @@
              "TemperaturesInChart": "Temperature [°C]",
              "TurnHeaterOff": "Turn Heater Off"
          },
@@ -1188,6 +1264,10 @@ index 538ceb4..d943035 100644
 +            "PreservedZ": "Z (unchanged, mm)",
 +            "Printing": "Calibration is unavailable while printing or paused.",
 +            "QueryProbe": "Query SexBall",
++            "RefreshStatus": "Refresh calibration status",
++            "RestoreFailed": "Could not restore calibration status. Reconnect to the printer and try again.",
++            "Restoring": "Restoring calibration status…",
++            "ReturnToCamera": "The requested tool or nozzle position does not match this check. Use Move T{tool} to camera, then inspect its alignment again.",
 +            "SafeHeight": "Travel height: {z} mm",
 +            "SaveCamera": "Save camera & restart",
 +            "SaveNotice": "The final confirmation saves XY offsets to Klipper config and restarts Klipper. Z offsets are preserved. Query results and command details appear in the Mainsail console.",
@@ -1200,7 +1280,10 @@ index 538ceb4..d943035 100644
 +                "saved": "Calibration saved. Klipper is restarting."
 +            },
 +            "Tool": "Physical tool",
-+            "UpgradeBackend": "Update Axiscope to the automatic XY version and restart Klipper."
++            "TrimNotice": "If alignment is off, adjust X/Y in 0.05 mm steps and visually recheck. Directions are printer axes; camera rotation can change their appearance. Corrections save with the final confirmation.",
++            "TrimStep": "{axis} 0.05 mm",
++            "UpgradeBackend": "Update Axiscope to the automatic XY version and restart Klipper.",
++            "Working": "Waiting for the printer command to finish…"
 +        },
 +        "ToolchangerPanel": {
 +            "BedTemperature": "Bed temperature",
@@ -1215,7 +1298,7 @@ index 538ceb4..d943035 100644
          "ToolheadControlPanel": {
              "Absolute": "absolute",
              "ALL": "ALL",
-@@ -1105,6 +1155,7 @@
+@@ -1105,6 +1162,7 @@
          "Machine": "Machine",
          "Printers": "Printers",
          "Timelapse": "Timelapse",
@@ -1347,10 +1430,10 @@ index 0000000..c121683
 +</script>
 diff --git a/src/plugins/axiscope.ts b/src/plugins/axiscope.ts
 new file mode 100644
-index 0000000..5d7bbec
+index 0000000..d57403a
 --- /dev/null
 +++ b/src/plugins/axiscope.ts
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,66 @@
 +export interface AxiscopeStatus {
 +    automatic_xy?: boolean
 +    xy_state?: string
@@ -1358,6 +1441,9 @@ index 0000000..5d7bbec
 +    safe_z?: number | null
 +    check_tool?: number | null
 +    check_position?: number[] | null
++    confirmation_ready?: boolean
++    confirmation_blocked?: string | null
++    camera_adjustment?: boolean
 +    confirmed_tools?: number[]
 +    xy_results?: Record<string, { offsets: number[]; name: string }>
 +}
@@ -1390,19 +1476,26 @@ index 0000000..5d7bbec
 +    const positionMatches =
 +        !status?.check_position ||
 +        status.check_position.every((value, index) => Math.abs(context.position[index] - value) <= 0.05)
++    const verificationReady = status?.confirmation_ready ?? positionMatches
++    const confirm =
++        motion &&
++        cameraClear &&
++        status?.xy_state === 'awaiting_confirmation' &&
++        status.check_tool != null &&
++        status.check_tool === context.tool &&
++        verificationReady
 +    return {
 +        query: connected,
 +        capture: motion && !pending && context.tool === 0 && context.position[2] <= context.safeZ!,
 +        saveCamera: motion && !pending && cameraClear,
 +        calibrate: motion && !pending && cameraClear,
 +        moveCamera: motion && cameraClear && status?.xy_state !== 'probing',
-+        confirm:
-+            motion &&
-+            cameraClear &&
-+            status?.xy_state === 'awaiting_confirmation' &&
-+            status.check_tool != null &&
-+            status.check_tool === context.tool &&
-+            positionMatches,
++        confirm,
++        adjust:
++            confirm &&
++            status?.camera_adjustment === true &&
++            status.check_tool !== 0 &&
++            !status.confirmed_tools?.includes(status.check_tool!),
 +        discard: connected && pending && status?.xy_state !== 'probing',
 +        cameraReady,
 +    }
@@ -1451,10 +1544,10 @@ index 1646c77..b5df261 100644
  ]
 diff --git a/tests/axiscope.spec.ts b/tests/axiscope.spec.ts
 new file mode 100644
-index 0000000..1a4a76b
+index 0000000..5a82fdc
 --- /dev/null
 +++ b/tests/axiscope.spec.ts
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,244 @@
 +import { describe, expect, it, vi } from 'vitest'
 +import { axiscopeControls, AxiscopeContext, AxiscopeStatus } from '../src/plugins/axiscope'
 +import ToolCalibrationPanel from '../src/components/panels/ToolCalibrationPanel.vue'
@@ -1516,6 +1609,24 @@ index 0000000..1a4a76b
 +        expect(axiscopeControls({ ...verifying, xy_state: 'measured' }, ready).confirm).toBe(false)
 +    })
 +
++    it('uses current backend verification after reload and preserves position safety', () => {
++        const verifying = {
++            ...idle,
++            xy_state: 'awaiting_confirmation',
++            check_tool: 2,
++            check_position: [100, 100, 30],
++            confirmation_ready: true,
++            camera_adjustment: true,
++        }
++        const context = { ...ready, tool: 2, position: [] }
++        expect(axiscopeControls(verifying, context).confirm).toBe(true)
++        expect(axiscopeControls(verifying, context).adjust).toBe(true)
++        expect(axiscopeControls({ ...verifying, confirmation_ready: false }, context).confirm).toBe(false)
++        expect(axiscopeControls({ ...verifying, check_tool: 0 }, ready).adjust).toBe(false)
++        expect(axiscopeControls({ ...verifying, confirmed_tools: [2] }, context).adjust).toBe(false)
++        expect(axiscopeControls({ ...verifying, camera_adjustment: false }, context).adjust).toBe(false)
++    })
++
 +    it('does not allow discarding a probe operation while its command is executing', () => {
 +        expect(axiscopeControls({ ...idle, xy_state: 'probing' }, ready).discard).toBe(false)
 +        expect(axiscopeControls({ ...idle, xy_state: 'awaiting_confirmation' }, ready).discard).toBe(true)
@@ -1531,6 +1642,7 @@ index 0000000..1a4a76b
 +        klipperReadyForGui: true,
 +        printerIsPrinting: false,
 +        error: '',
++        refreshStatus: vi.fn().mockResolvedValue(undefined),
 +        $store: { dispatch: vi.fn() },
 +        $socket: { emitAndWait: vi.fn().mockResolvedValue('ok') },
 +        $t: (key: string) => key,
@@ -1548,6 +1660,7 @@ index 0000000..1a4a76b
 +        expect(context.$socket.emitAndWait).toHaveBeenCalledExactlyOnceWith('printer.gcode.script', { script })
 +        expect(context.$store.dispatch).toHaveBeenCalledWith('server/addEvent', { message: script, type: 'command' })
 +        expect(context.busy).toBe(false)
++        expect(context.refreshStatus).toHaveBeenCalledOnce()
 +    })
 +
 +    it('blocks overlapping commands, printing and disconnected operation', async () => {
@@ -1576,5 +1689,106 @@ index 0000000..1a4a76b
 +        expect(await send.call(context, 'AXISCOPE_SET_CAMERA_POSITION CURRENT=1')).toBe(false)
 +        expect(context.error).toBe('Camera Z 30.000 exceeds safe_z 20.000')
 +        expect(context.busy).toBe(false)
++    })
++})
++
++describe('Axiscope restores the page from printer and persistent camera state', () => {
++    const options = (
++        ToolCalibrationPanel as unknown as {
++            options: {
++                methods: Record<string, (...args: any[]) => any>
++                computed: Record<string, { get: (...args: any[]) => any; set?: (...args: any[]) => any }>
++            }
++        }
++    ).options
++    const freshPage = () => ({
++        klipperReadyForGui: true,
++        statusLoaded: false,
++        statusRequest: 0,
++        error: '',
++        $socket: {
++            emitAndWait: vi.fn().mockResolvedValue({
++                status: {
++                    axiscope: { ...idle, xy_state: 'awaiting_confirmation', check_tool: 2, confirmed_tools: [0] },
++                    toolhead: { homed_axes: 'xyz', position: [100, 100, 30] },
++                    toolchanger: { tool_number: 2 },
++                },
++            }),
++        },
++        $store: {
++            dispatch: vi.fn().mockResolvedValue(undefined),
++            state: {
++                gui: {
++                    view: {
++                        webcam: {
++                            currentCam: {
++                                toolcalibration: 'Calibration camera',
++                                'toolcalibration-reference': 'Calibration camera',
++                            },
++                        },
++                    },
++                },
++            },
++        },
++        $t: (key: string) => key,
++    })
++
++    it('queries pending check and tool position on a fresh page without issuing any movement', async () => {
++        const context = freshPage()
++        await options.methods.refreshStatus.call(context)
++        expect(context.$socket.emitAndWait).toHaveBeenCalledExactlyOnceWith('printer.objects.query', {
++            objects: { axiscope: null, toolhead: null, toolchanger: null, bed_mesh: null },
++        })
++        expect(context.$store.dispatch).toHaveBeenCalledWith(
++            'printer/getData',
++            expect.objectContaining({
++                status: {
++                    axiscope: expect.objectContaining({ check_tool: 2, confirmed_tools: [0] }),
++                    toolhead: expect.any(Object),
++                    toolchanger: { tool_number: 2 },
++                },
++            })
++        )
++        expect(context.statusLoaded).toBe(true)
++    })
++
++    it('requeries status when the connection becomes ready', () => {
++        const context = { ...freshPage(), refreshStatus: vi.fn().mockResolvedValue(undefined) }
++        options.methods.onReady.call(context, true)
++        expect(context.refreshStatus).toHaveBeenCalledOnce()
++        options.methods.onReady.call(context, false)
++        expect(context.statusLoaded).toBe(false)
++        expect(context.statusRequest).toBe(1)
++    })
++
++    it('ignores an old query response after disconnect and does not unlock confirmation on query failure', async () => {
++        const context = freshPage()
++        let resolve: (value: unknown) => void = () => {}
++        context.$socket.emitAndWait.mockReturnValue(
++            new Promise((done) => {
++                resolve = done
++            }) as any
++        )
++        const pending = options.methods.refreshStatus.call(context)
++        context.statusRequest++
++        resolve({ status: {} })
++        await pending
++        expect(context.$store.dispatch).not.toHaveBeenCalled()
++        expect(context.statusLoaded).toBe(false)
++        context.$socket.emitAndWait.mockRejectedValue({ message: 'Disconnected' })
++        await options.methods.refreshStatus.call(context)
++        expect(context.error).toBe('Disconnected')
++        expect(context.statusLoaded).toBe(false)
++    })
++
++    it('recovers the selected camera and reference from printer GUI settings after reload', () => {
++        const context = freshPage()
++        expect(options.computed.cameraName.get.call(context)).toBe('Calibration camera')
++        expect(options.computed.capturedCameraName.get.call(context)).toBe('Calibration camera')
++        options.methods.rememberCamera.call(context, 'Another camera')
++        expect(context.$store.dispatch).toHaveBeenCalledWith('gui/setCurrentWebcam', {
++            page: 'toolcalibration-reference',
++            value: 'Another camera',
++        })
 +    })
 +})

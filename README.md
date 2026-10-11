@@ -1,4 +1,4 @@
-# Klipper Filament Sync — unified 2.0.3
+# Klipper Filament Sync — unified 2.0.4
 
 One filament-metadata integration for standard Klipper and RatOS. It adds the
 filament controls to Mainsail and, when installed, KlipperScreen; synchronizes
@@ -17,9 +17,9 @@ Run as the normal printer user while the printer is idle:
 
 ```bash
 cd ~ && \
-curl -fL 'https://github.com/maevebaksa/Klipper-Filament-Sync/releases/download/v2.19.0%2Bfs.2.0.3/filament-sync-unified-2.0.3.tar.gz' -o filament-sync-unified-2.0.3.tar.gz && \
-tar -xzf filament-sync-unified-2.0.3.tar.gz && \
-bash filament-sync-unified-2.0.3/install.sh --with-updates
+curl -fL 'https://github.com/maevebaksa/Klipper-Filament-Sync/releases/download/v2.19.0%2Bfs.2.0.4/filament-sync-unified-2.0.4.tar.gz' -o filament-sync-unified-2.0.4.tar.gz && \
+tar -xzf filament-sync-unified-2.0.4.tar.gz && \
+bash filament-sync-unified-2.0.4/install.sh --with-updates
 ```
 
 Run `RESTART` in Mainsail, then hard-refresh the browser. Verify with:
@@ -125,6 +125,18 @@ limits. Save the config, restart Klipper and recapture T0. The page shows the
 configured travel height and camera coordinates; an insufficient height is
 explained before probing. No height is raised automatically.
 
+Refreshing the page or reconnecting restores pending camera checks and the selected
+camera. **Refresh calibration status** retries a read-only status query. If
+Confirm is disabled, the hint explains the missing requirement; when needed,
+use **Move Tn to camera** and visually recheck.
+
+With the latest Axiscope backend, nonreference tools also have **X/Y ±0.05 mm**
+camera adjustments. Use these only to correct a visible residual, then inspect
+and confirm. The corrected pending XY offsets save with the final confirmation;
+Z is preserved. T0 must be recaptured after discarding the run rather than
+trimmed. A browser refresh preserves the run; restarting Klipper discards
+unsaved measurements. Update both Axiscope and this frontend for these controls.
+
 ## Credits
 
 Special thanks to **Sarah** for
@@ -136,7 +148,7 @@ Moonraker by Eric Callahan and contributors, and Mainsail by the Mainsail crew.
 
 ## Validation and source
 
-Release 2.0.3 passed 15 installer/updater tests and 54 Mainsail/frontend unit
+Release 2.0.4 passed 15 installer/updater tests and 59 Mainsail/frontend unit
 tests, plus lint, TypeScript and production compilation locally. GitHub Actions
 reruns these gates and validates archives/checksums before publishing. See
 `BUILD-STATUS.md` and the release assets for exact source identities.
