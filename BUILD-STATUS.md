@@ -1,4 +1,4 @@
-# Unified 2.0.2 validation
+# Unified 2.0.3 validation
 
 Source release for maevebaksa/Klipper-Filament-Sync. Published installer archives
 replace this file with the GitHub Actions build and upstream commit identity.
@@ -10,7 +10,9 @@ idle gating, and failed-update retry suppression. No physical printer has been
 changed or tested by this build.
 
 The frontend patch was previously validated on official Mainsail 2.19.0 commit
-5fb9e77fb9f4e60cf0725d9dc7f57cf7b84bbd70, including lint, all 46 upstream unit
-tests, TypeScript checking and production compilation. GitHub Actions reruns
+5fb9e77fb9f4e60cf0725d9dc7f57cf7b84bbd70, including lint, 54 upstream and calibration unit
+tests, TypeScript checking and production compilation. Calibration tests exercise
+physical tool confirmation gating, camera clearance and the existing Mainsail
+Moonraker socket; no private port or LAN API is used. GitHub Actions reruns
 these gates before it publishes a release. Source checkout alone is not an
 installer: download the release archive containing the compiled frontend.

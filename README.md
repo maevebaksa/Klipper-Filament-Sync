@@ -1,4 +1,4 @@
-# Klipper Filament Sync — unified 2.0.2
+# Klipper Filament Sync — unified 2.0.3
 
 One filament-metadata integration for standard Klipper and RatOS. It adds the
 filament controls to Mainsail and, when installed, KlipperScreen; synchronizes
@@ -17,9 +17,9 @@ Run as the normal printer user while the printer is idle:
 
 ```bash
 cd ~ && \
-curl -fL 'https://github.com/maevebaksa/Klipper-Filament-Sync/releases/download/v2.19.0%2Bfs.2.0.2/filament-sync-unified-2.0.2.tar.gz' -o filament-sync-unified-2.0.2.tar.gz && \
-tar -xzf filament-sync-unified-2.0.2.tar.gz && \
-bash filament-sync-unified-2.0.2/install.sh --with-updates
+curl -fL 'https://github.com/maevebaksa/Klipper-Filament-Sync/releases/download/v2.19.0%2Bfs.2.0.3/filament-sync-unified-2.0.3.tar.gz' -o filament-sync-unified-2.0.3.tar.gz && \
+tar -xzf filament-sync-unified-2.0.3.tar.gz && \
+bash filament-sync-unified-2.0.3/install.sh --with-updates
 ```
 
 Run `RESTART` in Mainsail, then hard-refresh the browser. Verify with:
@@ -86,6 +86,45 @@ reboot compilation and overlapping-watch warning.
 - Mainsail preserves the Drake tool-mapping workflow on toolchangers and avoids
   presenting tool mapping for one-filament machines.
 
+## Axiscope calibration through OctoEverywhere
+
+The Mainsail navigation now includes **Tool calibration** when `[axiscope]` is
+configured. It uses Mainsail's existing Moonraker connection and camera renderer,
+including the nozzle crosshair, instead of opening the Axiscope port-3000 UI.
+Your filament controls and Sarah's tool mapping remain included.
+
+1. Install/update [the automatic Axiscope backend](https://github.com/maevebaksa/Axiscope)
+   and restart Klipper. Keep only `[axiscope]`, without `[tools_calibrate]`.
+2. In Settings → Webcams, add/select the alignment camera using its actual
+   relative nginx stream path (for example `/webcam2/?action=stream`). The
+   example assumes that camera is already proxied at `/webcam2/`; this release
+   does not invent or change webcam routes. MJPEG is suitable for remote access.
+3. Home XYZ, perform normal leveling, clear bed mesh and select physical T0.
+   Use the movement controls to center its nozzle on the crosshair at a
+   noncontact inspection height, then **Capture T0 camera position**.
+4. Choose **Calibrate XY**, then visually verify each tool and confirm alignment.
+   The final confirmation writes XY offsets through Klipper `SAVE_CONFIG` and
+   restarts Klipper. Z offsets remain unchanged. **Discard calibration** drops
+   pending measurements without updating tool offsets.
+
+Open the normal Mainsail page through your existing OctoEverywhere connection.
+The calibration page uses that authenticated connection, without requiring
+remote access to port 3000. The camera must use a stream path that works through
+that connection; private LAN IP URLs cannot be reached from a remote browser.
+This release was tested with a simulated Moonraker transport, not a live
+OctoEverywhere tunnel or a physical printer.
+
+### Camera exceeds safe height
+
+`safe_z` is an absolute raw carriage Z travel height in millimetres. It must be
+at or above the camera inspection height for every tool (including tool Z offset
+differences) and clear every obstacle along the transit path. The earlier
+`safe_z: 20` example is not a measured clearance. If the camera reference is Z50,
+for example, a verified `safe_z: 60` may be suitable if it is within machine
+limits. Save the config, restart Klipper and recapture T0. The page shows the
+configured travel height and camera coordinates; an insufficient height is
+explained before probing. No height is raised automatically.
+
 ## Credits
 
 Special thanks to **Sarah** for
@@ -97,9 +136,10 @@ Moonraker by Eric Callahan and contributors, and Mainsail by the Mainsail crew.
 
 ## Validation and source
 
-Release 2.0.2 passed 15 installer/updater tests and all 46 upstream Mainsail unit
-tests, plus lint, TypeScript, production-build, archive-integrity, and checksum
-gates. See `BUILD-STATUS.md` and the release assets for exact source identities.
+Release 2.0.3 passed 15 installer/updater tests and 54 Mainsail/frontend unit
+tests, plus lint, TypeScript and production compilation locally. GitHub Actions
+reruns these gates and validates archives/checksums before publishing. See
+`BUILD-STATUS.md` and the release assets for exact source identities.
 
 - [Source repository](https://github.com/maevebaksa/Klipper-Filament-Sync)
 - [Latest release](https://github.com/maevebaksa/Klipper-Filament-Sync/releases/latest)

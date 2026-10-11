@@ -1,4 +1,4 @@
-name: Build patched Mainsail releases
+name: Build Mainsail with filament and Axiscope controls
 
 on:
   schedule:
