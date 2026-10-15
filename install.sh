@@ -154,7 +154,7 @@ while IFS= read -r -d '' candidate; do
     orbiter_candidates+=("${candidate}")
 done < <(
     find "${config_root}" -type f \
-        \( -iname 'OrbiterSensor.cfg' -o -iname 'Orbiter2_SmartSensor.cfg' -o -iname '*orbiter*smart*sensor*.cfg' \) \
+        \( -iname 'OrbiterSensor.cfg' -o -iname 'Orbiter2_SmartSensor.cfg' -o -iname '*orbiter*smart*sensor*.cfg' -o -iname 'so3_[0-9]*.cfg' \) \
         ! -path "${install_root}/*" \
         ! -name '*.before-filament-sync-*' \
         ! -name '*.bak' \
@@ -163,22 +163,19 @@ done < <(
 for candidate in "${orbiter_candidates[@]}"; do
     if [[ -f ${candidate} ]] && "${install_root}/orbiter_temperature_patch.py" --check "${candidate}" 2>/dev/null; then
         orbiter_config="${candidate}"
-        break
+        if grep -Fq 'FILAMENT_SYNC_PROFILE_TEMP_V2' "${orbiter_config}" || \
+            { grep -Fq 'FILAMENT_SYNC_PROFILE_TEMP_BEGIN' "${orbiter_config}" && \
+              ! grep -Fq 'filament_sync_load_target' "${orbiter_config}"; }; then
+            echo "Orbiter saved-temperature integration is already installed in ${orbiter_config}"
+        else
+            install -m 644 "${orbiter_config}" "${orbiter_config}.before-filament-sync-${timestamp}"
+            "${install_root}/orbiter_temperature_patch.py" "${orbiter_config}"
+            echo "Integrated saved filament temperatures into ${orbiter_config}"
+        fi
     fi
 done
-
-if [[ -n ${orbiter_config} ]]; then
-    if grep -Fq 'FILAMENT_SYNC_PROFILE_TEMP_V2' "${orbiter_config}" || \
-        { grep -Fq 'FILAMENT_SYNC_PROFILE_TEMP_BEGIN' "${orbiter_config}" && \
-          ! grep -Fq 'filament_sync_load_target' "${orbiter_config}"; }; then
-        echo "Orbiter saved-temperature integration is already installed in ${orbiter_config}"
-    else
-        install -m 644 "${orbiter_config}" "${orbiter_config}.before-filament-sync-${timestamp}"
-        "${install_root}/orbiter_temperature_patch.py" "${orbiter_config}"
-        echo "Integrated saved filament temperatures into ${orbiter_config}"
-    fi
-else
-    echo "No supported OrbiterSensor.cfg or KTC Orbiter sensor file found; skipped temperature integration"
+if [[ -z ${orbiter_config} ]]; then
+    echo "No supported Orbiter sensor file found; skipped temperature integration"
 fi
 else
     echo "RatOS owns the filament sensor callbacks; no Orbiter sensor file was edited"

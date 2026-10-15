@@ -1,0 +1,31 @@
+name: Printer compatibility checks (no release)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Installer and macro regression tests
+        run: |
+          python3 -m pip install 'Jinja2==3.1.6'
+          bash -n install.sh verify.sh
+          python3 -m unittest discover -s tests -v
+      - name: Full pinned frontend build and archive validation
+        run: >-
+          python3 ci/build.py build --repo maevebaksa/Klipper-Filament-Sync
+          --upstream-tag v2.19.0 --source-sha 5fb9e77fb9f4e60cf0725d9dc7f57cf7b84bbd70
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-test-build-not-for-production
+          path: release-output/*
+          retention-days: 7
