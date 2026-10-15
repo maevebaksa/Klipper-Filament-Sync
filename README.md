@@ -73,6 +73,36 @@ reboot compilation and overlapping-watch warning.
 
 ## Filament behavior
 
+### Makertech ProForge 5 / Smart Orbiter 3
+
+Stock ProForge 5 is detected from `SELECT_PH1`–`SELECT_PH5`, `DOCK`, and
+`save_variables.active_tools`. Filament metadata remains zero-based (`T0`–`T4`),
+while dashboard pickup sends the corresponding one-based `SELECT_PH` command.
+Parking sends `DOCK`. Native KTC tool objects take precedence on other printers.
+Mounted-head highlighting uses carriage and dock sensors; activating an extruder
+alone does not indicate that a head is physically attached.
+
+The installer integrates saved temperatures into each supported `so3_N.cfg`,
+with a backup and repeat-install protection. Native insert/unload-button callbacks,
+runout handling, and extrusion procedures remain intact. Dashboard load/unload
+calls `_FILAMENT_LOAD_INIT_N` / `_FILAMENT_UNLOAD_INIT_N`, retaining the stock
+print-state and disable-autoload checks. These routines intentionally activate
+the extruder with `Tn`; they do not pick up a docked head. A valid active target
+takes precedence over the saved profile; stale profiles fall back to stock
+temperatures. Selected temperatures above the head's configured limit abort.
+
+Stock ProForge has no Drake/KTC tool-remapping API, so the print dialog does not
+offer that mapping on ProForge. Use Makertech slicer profiles with their physical
+selection commands. Existing KTC mapping and RatOS routines retain their paths.
+
+Compatibility is tested against official Makertech configuration commit
+`34261d17de23963f3fa1708453b8c92aaa85ac0e`. Offline tests do not validate physical
+pickup, docking, or extrusion. Before production rollout, verify those operations
+on an idle stock machine with each installed head, including automatic insertion,
+unload button, paused-print temperature restoration and disabled-auto-load behavior.
+
+### Existing printer integrations
+
 - `SET_TOOL_FILAMENT` stores material, color, nozzle temperature, and bed
   temperature for each physical tool.
 - `FILAMENT_SYNC_STATUS` reports the saved metadata.

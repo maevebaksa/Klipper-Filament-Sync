@@ -144,7 +144,63 @@ def patch_stock_section(source: str, macro: str, target: str, fallback: str) -> 
     return source[: match.start()] + updated + source[match.end() :]
 
 
+def patch_so3(source: str) -> str:
+    """Patch the two temperature paths, preserving native callbacks and motion.
+
+    SO3 Tn activates a motor; SELECT_PH(n+1) moves the carriage. Autoload
+    deliberately keeps Tn, allowing the manufacturer's docked-head loading.
+    """
+    ids = re.findall(r"^\[gcode_macro _SENSOR_VARIABLES_(\d+)\]", source, re.M)
+    if len(ids) != 1:
+        raise ValueError("expected one SO3 sensor configuration per file")
+    tool = int(ids[0])
+    extruder = "extruder" + (str(tool) if tool else "")
+    for operation in ("load", "unload"):
+        pattern = re.compile(
+            rf"^\[gcode_macro _filament_{operation}_{tool}\][^\n]*\n.*?(?=^\[|\Z)",
+            re.M | re.S,
+        )
+        match = pattern.search(source)
+        if match is None:
+            raise ValueError(f"missing SO3 {operation} macro")
+        section = match.group()
+        sensor = f"{{% set sensor = printer['gcode_macro _SENSOR_VARIABLES_{tool}'] %}}"
+        fallback = f"sensor.filament_{operation}_temp"
+        target = f"filament_sync_{operation}_target"
+        if section.count(sensor) != 1:
+            raise ValueError("unsupported SO3 sensor reference")
+        for command in (f"SET_HEATER_TEMPERATURE HEATER={extruder} TARGET={{{fallback}}}",
+                        f"TEMPERATURE_WAIT SENSOR={extruder} MINIMUM={{{fallback}}}"):
+            if section.count(command) != 1:
+                raise ValueError("unsupported SO3 heater command")
+        section = section.replace(fallback, target)
+        condition = re.compile(rf"^[ \t]*{{% if .*printer\.{extruder}\.can_extrude.*$", re.M)
+        section, count = condition.subn("      {% if true %} # Wait for the selected profile temperature", section)
+        if count != 1:
+            raise ValueError("unsupported SO3 heater condition")
+        block = stock_profile_block("    ", target, fallback)
+        block = block.replace(" > 0", f" > {tool}").replace("[0]", f"[{tool}]")
+        block = block.replace("printer.extruder.target", f"printer.{extruder}.target")
+        block += f"""
+    {{% if {target} > printer.configfile.settings.{extruder}.max_temp|float %}}
+      {{ action_raise_error('Filament temperature exceeds {extruder} max_temp') }}
+    {{% endif %}}"""
+        section = section.replace(sensor, sensor + "\n" + block)
+        if operation == "unload":
+            off = f"SET_HEATER_TEMPERATURE HEATER={extruder} TARGET=0"
+            if section.count(off) != 1:
+                raise ValueError("unsupported SO3 heater restore")
+            section = section.replace(off, f"SET_HEATER_TEMPERATURE HEATER={extruder} TARGET={{user_temp}}")
+        source = source[:match.start()] + section + source[match.end():]
+    return source
+
+
 def patch_source(source: str) -> str:
+    if re.search(r"^\[gcode_macro _SENSOR_VARIABLES_\d+\]", source, re.M):
+        try:
+            return patch_so3(source)
+        except ValueError as exc:
+            raise SystemExit(f"Unsupported Smart Orbiter 3 configuration; no changes made: {exc}") from exc
     if source.count(OLD_LOAD) == 1 and source.count(OLD_UNLOAD) == 1:
         return source.replace(OLD_LOAD, NEW_LOAD).replace(OLD_UNLOAD, NEW_UNLOAD)
     try:

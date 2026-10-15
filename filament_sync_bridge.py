@@ -126,6 +126,20 @@ def _count_matching_tools(objects: list[str], pattern: re.Pattern[str]) -> int:
 
 
 def detect_tool_count(variables: dict[str, Any], objects: list[str]) -> int:
+    # ProForge ships five activation macros even when fewer heads are enabled.
+    # Its physical pickup commands use one-based PH numbers, not Tn.
+    names = {name.strip().upper() for name in objects}
+    if "GCODE_MACRO DOCK" in names and "GCODE_MACRO SELECT_PH1" in names and not any(
+        TOOL_OBJECT.fullmatch(name.strip()) for name in objects
+    ):
+        try:
+            active = int(variables.get("active_tools", 0))
+        except (TypeError, ValueError):
+            active = 0
+        if 1 <= active <= 5 and all(
+            f"GCODE_MACRO SELECT_PH{tool + 1}" in names for tool in range(active)
+        ):
+            return active
     # Native KTC tool objects are authoritative. Tn macros cover other
     # toolchangers; extruder/extruder1/... covers ordinary single- and
     # multi-extruder Klipper printers without any toolchanger macros.

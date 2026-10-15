@@ -29,6 +29,7 @@ jobs:
           persist-credentials: false
       - name: Validate installer, scheduler and panel syntax
         run: |
+          python3 -m pip install 'Jinja2==3.1.6'
           bash -n install.sh verify.sh
           python3 -m py_compile klipperscreen/maeve_filaments.py
           python3 -m unittest discover -s tests -v

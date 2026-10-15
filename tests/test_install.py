@@ -33,8 +33,9 @@ class InstallTests(unittest.TestCase):
     def test_standard_and_ratos_fresh_repeat(self):
         # On non-root CI, install.sh derives the actual login name but getent
         # still supplies only this isolated home. sudo and systemctl are shims.
-        for ratos in (False, True):
-            with self.subTest(ratos=ratos), tempfile.TemporaryDirectory() as temp:
+        for mode in ('standard', 'ratos', 'proforge'):
+            ratos = mode == 'ratos'
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
                 home = Path(temp)
                 source = home / "installer"
                 shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__", "release-output"))
@@ -49,6 +50,9 @@ class InstallTests(unittest.TestCase):
                 boundary = "#*# <---------------------- SAVE_CONFIG ---------------------->\n#*# [extruder]\n#*# pid_Kp = 23.45\n"
                 (config / "printer.cfg").write_text("[extruder]\nmax_temp: 300\n\n" + boundary)
                 (config / "RatOS.cfg").write_text("# generated baseline must remain unchanged\n")
+                if mode in ('proforge', 'ratos'):
+                    for fixture in (ROOT / 'tests/fixtures/proforge5').glob('so3_*.cfg'):
+                        shutil.copy2(fixture, config / fixture.name)
                 mainsail = home / "mainsail"
                 mainsail.mkdir()
                 (mainsail / "index.html").write_text("previous frontend")
@@ -86,6 +90,14 @@ class InstallTests(unittest.TestCase):
                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                     self.assertEqual(result.returncode, 0, result.stdout)
                 text = (config / "printer.cfg").read_text()
+                if ratos:
+                    for fixture in (ROOT / 'tests/fixtures/proforge5').glob('so3_*.cfg'):
+                        self.assertEqual((config / fixture.name).read_bytes(), fixture.read_bytes())
+                if mode == 'proforge':
+                    for tool in range(5):
+                        sensor = config / f'so3_{tool}.cfg'
+                        self.assertEqual(sensor.read_text().count('FILAMENT_SYNC_PROFILE_TEMP_V2'), 2)
+                        self.assertEqual(len(list(config.glob(sensor.name + '.before-filament-sync-*'))), 1)
                 self.assertTrue(text.endswith(boundary))
                 self.assertEqual(text.count("[include tool-filament-sync/filament-sync.cfg]"), 1)
                 self.assertEqual((config / "RatOS.cfg").read_text(), "# generated baseline must remain unchanged\n")
