@@ -24,6 +24,8 @@ def render(source, tool, operation, profile=245, target=0, material='PLA', tag='
     variables = dict(filament_types=['PLA'] * tool + [material],
                      filament_temp_materials=['PLA'] * tool + [tag],
                      filament_nozzle_temps=[210] * tool + [profile])
+    if profile is None:
+        variables = {}
     printer = {'save_variables': {'variables': variables},
                'configfile': {'settings': {extruder: {'max_temp': 300}}},
                extruder: {'target': target, 'can_extrude': target >= 165},
@@ -81,11 +83,16 @@ gcode:
                     (245, 0, 'PLA', 245), (245, 260, 'PLA', 260),
                     (245, 200, 'PLA', 200), (245, 0, 'ABS', 220 if operation == 'load' else 185),
                     (0, 0, 'PLA', 220 if operation == 'load' else 185),
+                    (None, 0, 'PLA', 220 if operation == 'load' else 185),
+                    (180, 0, 'PLA', 220 if operation == 'load' else 185),
+                    (300, 0, 'PLA', 300),
                 ):
                     with self.subTest(tool=tool, operation=operation, target=target, tag=tag, profile=profile):
                         result = render(updated, tool, operation, profile=profile, target=target, tag=tag)
                         self.assertIn(f'HEATER={extruder} TARGET={expected}', result)
                         self.assertIn(f'SENSOR={extruder} MINIMUM={expected}', result)
+                        heater_targets = re.findall(rf'HEATER={extruder} TARGET=([0-9.]+)', result)
+                        self.assertEqual(float(heater_targets[-1]), target)
                         self.assertRegex(result, rf'(?m)^\s*T{tool}\s*$')
                         self.assertNotIn('SELECT_PH', result)
                 with self.assertRaises(ValueError):
